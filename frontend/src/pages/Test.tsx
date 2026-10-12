@@ -7,7 +7,7 @@ import type { FrameInfo } from "../lib/engine";
 import type { GateOutput, Vocabulary } from "../lib/types";
 
 const TIMEOUT_MS = 8000;
-type Scope = "all" | "Numerals" | "Alphabet";
+type Scope = "all" | "Alphabet";
 type Phase = "setup" | "run" | "done";
 
 /** A guided accuracy test: show each sign in turn; the app records what it commits (or that it stayed Uncertain).
@@ -28,7 +28,7 @@ export function Test() {
   const startedAt = useRef(0), lock = useRef(false);
   const cur = useRef({ phase, queue, idx }); cur.current = { phase, queue, idx };
 
-  useEffect(() => { loadVocab().then(setVocab).catch(() => {}); }, []);
+  useEffect(() => { loadVocab("alphabet").then(setVocab).catch(() => {}); }, []);
   const byKey = useMemo(() => new Map((vocab?.signs ?? []).map((v) => [v.key, v])), [vocab]);
   const pool = (vocab?.signs ?? []).filter((v) => v.active && (scope === "all" || v.category === scope));
   const target = phase === "run" ? queue[idx] : null;
@@ -86,14 +86,14 @@ export function Test() {
         {phase === "run" && <Chip kind="load" pulse>Sign {idx + 1} of {queue.length}</Chip>}</header>
 
       <div className="test-grid">
-        <Stage compact onView={setView} onCommit={onCommit} onState={setStage} />
+        <Stage compact mode="alphabet" onView={setView} onCommit={onCommit} onState={setStage} />
         <div className="card test-panel">
           {phase === "setup" && (<>
             <h2>Start a test</h2>
             <label className="field"><span>Tester code (anonymous)</span>
               <input className="mono" value={tester} onChange={(e) => setTester(e.target.value)} placeholder="T01, or leave blank" maxLength={16} aria-label="Tester code" /></label>
             <div className="field"><span>Signs to test</span>
-              <div className="segmented" role="radiogroup" aria-label="Scope">{(["all", "Numerals", "Alphabet"] as Scope[]).map((s) => <button key={s} role="radio" aria-checked={scope === s} className={scope === s ? "on" : ""} onClick={() => setScope(s)}>{s === "all" ? `All (${vocab?.signs.length ?? 35})` : s}</button>)}</div></div>
+              <div className="segmented" role="radiogroup" aria-label="Scope">{(["all", "Alphabet"] as Scope[]).map((s) => <button key={s} role="radio" aria-checked={scope === s} className={scope === s ? "on" : ""} onClick={() => setScope(s)}>{s === "all" ? `All (${vocab?.signs.length ?? 26})` : s}</button>)}</div></div>
             <p className="muted small">For the strongest evidence, have someone who never calibrated or practised the app do the test. Use a code like T01 rather than a name.</p>
             <button className="btn btn-primary btn-lg" onClick={start} disabled={!ready || !pool.length}><Icon name="target" size={20} /> {ready ? `Start (${pool.length} signs)` : "Waiting for camera and model…"}</button>
           </>)}

@@ -1,39 +1,47 @@
-# ISL Interpreter (Hacktopia 2026, PS 06)
+# ISL Interpreter
 
-Real-time Indian Sign Language to text, in the browser. Model: **venmugilrajan/SignLens-Landmark-Model** (pretrained, Apache-2.0, 35 classes: 1-9, A-Z). No training happens in this app.
+Real-time Indian Sign Language recognition in the browser, with the trained classifier running in the backend.
 
-## Run it
-1. `python scripts/setup.py`  (installs the backend, builds the frontend if Node is present, downloads the two model files)
-2. `python scripts/run.py`
-3. Open http://localhost:8000 (camera needs localhost or https)
+- **Hand tracking**: MediaPipe HandLandmarker (`model/hand_landmarker.task`), in the browser.
+- **Classifier**: the MLP trained by the team (`model_aug/`), run by the backend. Preprocessing is `backend/app/features.py`, a byte-identical copy of `training/features.py`.
+- **Parity**: on every start the backend recomputes the saved fixture `model_aug/parity_test.json` and reports the result on the Results screen. The current check gives 0.0 feature difference and 1.8e-13 probability difference.
 
-If setup cannot download a file, the app says exactly which file is missing and where to save it:
-- `mediapipe/hand_landmarker.task` from storage.googleapis.com (MediaPipe)
-- `model/isl_landmarks_weights.json` from huggingface.co/venmugilrajan/SignLens-Landmark-Model
+## Run the web app
+```
+python3 scripts/setup.py     # once: installs the backend packages
+python3 scripts/run.py       # then open http://localhost:8000 in Chrome or Edge
+```
+Allow camera access. Hold a sign steady for about half a second to add it to the sentence.
+
+## Run the desktop webcam demo (teammate's workflow)
+```
+python3 training/live_clean.py --model-dir model_aug --smooth 8
+```
+Press **A** for alphabet, **D** for digits 1–9, **Q** to quit. Digit mode needs the `model_digits/` folder, which is not in the repo yet.
 
 ## Screens
-- **Interpreter**: live webcam, hand skeleton, recognised sign with hold ring, top 3, sentence builder (Speak / Space / Back / Clear), "Signs I know" practice tiles, settings drawer.
-- **Live test**: guided accuracy test. Each sign is shown in turn and the app records what it read, or that it stayed Uncertain.
-- **Model & results**: the author's published numbers, clearly labelled as self-reported, next to our own measured live-test results.
+- **Interpreter**: live camera, skeleton, recognised letter with hold ring, top 3, sentence builder (Speak / Space / Back / Clear), "Signs I know" practice tiles.
+- **Live test**: a guided test. Each letter is shown in turn and the app records what it read, or that it stayed uncertain.
+- **Model & results**: parity check, our live-test results, and per-letter hit rates.
 
-## Important: calibrate once
-The model card gives the 156-value input size but not the exact ordering of coordinates, angles and hand slots. The app therefore includes a **Calibrate** step: show a sign you know and it picks the feature layout under which the model recognises it best. Until calibration is done, the app shows a warning.
+## Recognition rules
+Probabilities are averaged over the last 8 frames (`--smooth 8`). A letter is shown only when that average reaches 0.8 (`threshold` in `model_aug/config.json`). A letter is added to the sentence after it is held for 600 ms.
 
-## Accuracy
-Do not quote the 98% figure as our result. It is the author's block-split test. Their own card says realistic accuracy is about 96.5-98%, and ASL is about 95% across sessions. Our numbers come only from the Live test, and they should be measured on people who did not calibrate or practise the app.
+## Layout
+```
+backend/app/        API (main.py), classifier (inference.py), features.py (= training/features.py), SQLite for live tests
+frontend/           React + Vite app (built into frontend/dist, which is committed)
+model/              hand_landmarker.task (MediaPipe)
+model_aug/          trained classifier: model.json (exported weights), labels.json, config.json, parity_test.json,
+                    isl_clean_mlp.joblib (the scikit-learn original)
+training/           teammate's training and live scripts (unchanged)
+mediapipe/wasm/     MediaPipe runtime files for the browser
+scripts/            setup.py, run.py
+```
 
-## Backend API
-- `GET /health`, `GET /api/vocabulary`, `GET /api/model`
-- `POST /api/live-tests`, `GET /api/live-tests`, `DELETE /api/live-tests/{tester}`
-- Interactive docs: http://localhost:8000/docs
+## Updating the model
+When the classifier is retrained, export the new `model.json`, `labels.json`, `config.json`, and `parity_test.json` into `model_aug/`, then restart `run.py`. The backend refuses to start if the parity check fails.
 
-## Tests
-- Frontend: `cd frontend && npm test`
-- Build: `cd frontend && npm run build`
-
-## Folder map
-- `frontend/src/lib/signlens.ts`: 156-value feature builder (24 candidate layouts) and the SignLens MLP forward pass
-- `frontend/src/lib/gate.ts`: confidence gate (threshold, margin, smoothing, hold, release)
-- `frontend/src/lib/tracker.ts`: two-hand MediaPipe tracker
-- `backend/data/vocabulary.json`: the 35 classes, names and notes
-- `model/`: config, labels, model card (weights downloaded by setup)
+## Limitations
+- Static letters only. Continuous signing and full sentences are not recognised.
+- The test metrics included in the training repo are not repeated here. Accuracy shown in the app is what the Live test measures.

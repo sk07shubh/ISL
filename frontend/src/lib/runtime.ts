@@ -1,24 +1,21 @@
-import { getJson } from "./api";
-import { AppError, type ConfigFile, type Vocabulary } from "./types";
-import { INPUT_DIM, SignLensModel } from "./signlens";
-import { Gate } from "./gate";
+import { getJson, type Mode } from "./api";
+import type { GateConfig, ModelInfo, Vocabulary } from "./types";
 
-export interface ModelRuntime { model: SignLensModel; labels: string[]; cfg: ConfigFile; makeGate: () => Gate }
-let vocabP: Promise<Vocabulary> | null = null, modelP: Promise<ModelRuntime> | null = null;
-export const resetRuntime = () => { vocabP = null; modelP = null; };
-export const loadVocab = () => (vocabP ??= getJson<Vocabulary>("/api/vocabulary", "/api/vocabulary"));
+let infoP: Promise<ModelInfo> | null = null;
+const vocabP = new Map<Mode, Promise<Vocabulary>>();
+export const resetRuntime = () => { infoP = null; vocabP.clear(); };
 
-export function loadModelRuntime(): Promise<ModelRuntime> {
-  return (modelP ??= (async () => {
-    const cfg = await getJson<ConfigFile>("/model/config.json", "model/config.json");
-    const [labels, weights] = await Promise.all([
-      getJson<string[]>("/model/labels.json", "model/labels.json"),
-      getJson<Record<string, any>>("/model/" + cfg.weights_file, "model/" + cfg.weights_file),
-    ]);
-    if (cfg.input_dim !== INPUT_DIM) throw new AppError("version_mismatch", "model/config.json", `config.json says ${cfg.input_dim} inputs; this app builds ${INPUT_DIM}.`);
-    const model = new SignLensModel(weights, "model/" + cfg.weights_file);
-    if (JSON.stringify(model.classes) !== JSON.stringify(labels))
-      throw new AppError("version_mismatch", "model/labels.json", `labels.json (${labels.length}) does not match the classes inside ${cfg.weights_file} (${model.classes.length}). Class order must be identical.`);
-    return { model, labels, cfg, makeGate: () => new Gate(labels, cfg, "__none__") };
-  })().catch((e) => { modelP = null; throw e; }));
+/** Model description from the backend: labels, threshold, smoothing, parity check. Loaded once. */
+export const loadModel = (): Promise<ModelInfo> =>
+  (infoP ??= getJson<ModelInfo>("/api/model", "/api/model").catch((e) => { infoP = null; throw e; }));
+
+export function loadVocab(mode: Mode): Promise<Vocabulary> {
+  if (!vocabP.has(mode))
+    vocabP.set(mode, getJson<Vocabulary>(`/api/vocabulary?mode=${mode}`, "/api/vocabulary").catch((e) => { vocabP.delete(mode); throw e; }));
+  return vocabP.get(mode)!;
+}
+
+/** The app's sign-commit rules, fed with the same threshold and smoothing as live_clean.py. */
+export function gateConfig(info: ModelInfo): GateConfig {
+  return { min_prob: info.gate.threshold, min_margin: 0, smoothing_window: 1, smoothing_agree: 1, hold_ms: info.gate.hold_ms, release_ms: info.gate.release_ms };
 }

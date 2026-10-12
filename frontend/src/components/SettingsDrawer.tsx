@@ -34,10 +34,10 @@ export function SettingsDrawer() {
           </select>
         </label>
         <Toggle on={s.mirror} onChange={(mirror) => set({ mirror })} label="Mirror video" hint="Like a mirror, so left and right feel natural. Does not change recognition." />
-        <Toggle on={s.showSkeleton} onChange={(showSkeleton) => set({ showSkeleton })} label="Show skeleton overlay" hint="The 21 tracked hand points." />
+        <Toggle on={s.showSkeleton} onChange={(showSkeleton) => set({ showSkeleton })} label="Show skeleton overlay" hint="The 21 tracked points per hand." />
         <Toggle on={s.speakEach} onChange={(speakEach) => set({ speakEach })} label="Speech output" hint="Speak each sign as it is added. The Speak button always reads the whole sentence." />
 
-        <label className="field"><span><Icon name="type" size={16} /> Language for text and speech</span>
+        <label className="field"><span><Icon name="type" size={16} /> Language for speech</span>
           <select value={s.lang} onChange={(e) => set({ lang: e.target.value as LangCode, voiceURI: "" })}>
             {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
           </select>
@@ -47,11 +47,9 @@ export function SettingsDrawer() {
             <option value="">Automatic ({tag})</option>
             {vs.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>)}
           </select>
-          {vs.length === 0 && <small className="muted">No {tag} voice is installed on this device; the browser default will be used. Add one in your OS speech settings.</small>}
+          {vs.length === 0 && <small className="muted">No {tag} voice is installed on this device; the browser default will be used.</small>}
         </label>
         <button className="btn btn-secondary" onClick={() => speak(s.lang === "en" ? "Testing the voice" : s.lang === "hi" ? "नमस्ते" : "नमस्कार", s.lang, s.voiceURI)}><Icon name="speaker" size={18} /> Test voice</button>
-        <p className="muted small">{s.calibrated ? `Feature layout #${s.variant} is calibrated.` : "Feature layout is not calibrated yet (use Calibrate on the Interpreter screen)."}</p>
-        <p className="muted small">Names shown and spoken come from the vocabulary sheet, so a language only appears for signs that have a name in it.</p>
       </aside>
     </div>
   );

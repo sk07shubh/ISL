@@ -1,9 +1,11 @@
-node_modules/
-frontend/dist/
+# local data and caches
 backend/data/isl.db*
 __pycache__/
 *.pyc
 .venv/
-mediapipe/hand_landmarker.task
-model/isl_landmarks_weights.json
-model/*.png
+venv/
+env/
+.pytest_cache/
+# frontend build tools (the built dist/ IS committed so the app runs without Node)
+frontend/node_modules/
+data/

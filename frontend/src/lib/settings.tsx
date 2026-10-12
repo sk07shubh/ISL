@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { LangCode } from "./speech";
 
-export interface Settings { deviceId: string; mirror: boolean; showSkeleton: boolean; speakEach: boolean; lang: LangCode; voiceURI: string; variant: number; calibrated: boolean }
-const DEFAULTS: Settings = { deviceId: "", mirror: true, showSkeleton: true, speakEach: false, lang: "en", voiceURI: "", variant: 0, calibrated: false };
-const KEY = "isl.settings.v2";
+export interface Settings { deviceId: string; mirror: boolean; showSkeleton: boolean; speakEach: boolean; lang: LangCode; voiceURI: string }
+const DEFAULTS: Settings = { deviceId: "", mirror: true, showSkeleton: true, speakEach: false, lang: "en", voiceURI: "" };
+const KEY = "isl.settings.v3";
 const Ctx = createContext<{ s: Settings; set: (p: Partial<Settings>) => void; open: boolean; setOpen: (b: boolean) => void }>(null as never);
 export const useSettings = () => useContext(Ctx);
 

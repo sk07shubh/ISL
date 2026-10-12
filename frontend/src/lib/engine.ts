@@ -1,48 +1,68 @@
-import { buildFeatures, VARIANTS, type SignLensModel } from "./signlens";
 import type { Gate } from "./gate";
+import { predictFrame, type Mode } from "./api";
 import type { Tracker } from "./tracker";
 import type { GateOutput, Landmark, TrackHand } from "./types";
 
 export interface FrameInfo {
-  t: number; hands: TrackHand[]; feats: Float32Array | null; probs: Float64Array | null; gate: GateOutput | null;
-  ms: { track: number; feat: number; model: number; total: number }; fps: number;
+  t: number; hands: TrackHand[]; probs: number[] | null; gate: GateOutput | null; fps: number; buffered: number;
+  ms: { track: number; server: number; total: number };
 }
 export const CONNECTIONS: [number, number][] = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
 
 export interface EngineOpts {
-  video: HTMLVideoElement | null; canvas: HTMLCanvasElement | null; tracker: Tracker; model: SignLensModel; gate: Gate;
-  variant: () => number; skeleton: () => boolean; onFrame?: (f: FrameInfo) => void; onCommit?: (label: string, g: GateOutput) => void;
+  video: HTMLVideoElement | null; canvas: HTMLCanvasElement | null; tracker: Tracker; gate: Gate; mode: Mode; smooth: number;
+  skeleton: () => boolean; onFrame?: (f: FrameInfo) => void; onCommit?: (label: string, g: GateOutput) => void;
 }
 
-/** Per-frame pipeline: tracker -> features (156) -> SignLens MLP -> confidence gate. Runs from refs; React reads 10 snapshots/s. */
+/**
+ * Per-frame loop: MediaPipe finds the hand points in the browser; the backend classifies them.
+ * Probabilities are averaged over the last `smooth` results (live_clean.py --smooth 8), and the
+ * gate shows a sign only once that average is above the threshold.
+ */
 export class Engine {
   private raf = 0; private running = false; private lastVT = -1; private fpsT = performance.now(); private fpsN = 0; private fps = 0; private lastTs = 0;
+  private inflight = false; private hist: Float64Array[] = [];
   constructor(private o: EngineOpts) {}
-  start() { if (this.running) return; this.running = true; this.o.gate.reset(); this.loop(); }
+  start() { if (this.running) return; this.running = true; this.hist = []; this.o.gate.reset(); this.loop(); }
   stop() { this.running = false; cancelAnimationFrame(this.raf); const c = this.o.canvas; c?.getContext("2d")?.clearRect(0, 0, c.width, c.height); }
 
   private loop = () => {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.loop);
-    const { video, tracker, model, gate } = this.o;
+    const { video, tracker, gate } = this.o;
     if (!video || video.readyState < 2 || video.currentTime === this.lastVT) return;
     this.lastVT = video.currentTime;
     const now = performance.now();
+    const ts = Math.max(now, this.lastTs + 1); this.lastTs = ts;
     let hands: TrackHand[] = [];
-    try { hands = tracker.detect(video, Math.max(now, this.lastTs + 1)).hands; } catch { hands = []; }
-    this.lastTs = Math.max(now, this.lastTs + 1);
-    const t1 = performance.now();
-    const feats = buildFeatures(hands, VARIANTS[this.o.variant()] ?? VARIANTS[0]);
-    const t2 = performance.now();
-    const probs = feats ? model.predict(feats) : null;
-    const t3 = performance.now();
+    try { hands = tracker.detect(video, ts).hands; } catch { hands = []; }
+    const tTrack = performance.now() - now;
+
+    if (!hands.length) this.hist = [];
+    else if (!this.inflight) {
+      this.inflight = true;
+      const aspect = (video.videoWidth || 640) / (video.videoHeight || 480);   // frame width / height, as in live_clean.py
+      const t0 = performance.now();
+      predictFrame(hands.map((h) => h.landmarks as Landmark[]), aspect, this.o.mode)
+        .then((r) => {
+          this.serverMs = performance.now() - t0;
+          if (r.probs) { this.hist.push(Float64Array.from(r.probs)); if (this.hist.length > this.o.smooth) this.hist.shift(); }
+          else this.hist = [];
+        })
+        .catch(() => { this.hist = []; })
+        .finally(() => { this.inflight = false; });
+    }
+    const probs = this.hist.length >= this.o.smooth ? average(this.hist) : null;
     const g = gate.update(now, hands.length > 0, probs);
     if (g.committed) this.o.onCommit?.(g.committed, g);
+
     this.fpsN++;
     if (now - this.fpsT >= 1000) { this.fps = (this.fpsN * 1000) / (now - this.fpsT); this.fpsN = 0; this.fpsT = now; }
     this.draw(hands, g);
-    this.o.onFrame?.({ t: now, hands, feats, probs, gate: g, fps: this.fps, ms: { track: t1 - now, feat: t2 - t1, model: t3 - t2, total: performance.now() - now } });
+    this.o.onFrame?.({ t: now, hands, probs: probs ? Array.from(probs) : null, gate: g, fps: this.fps, buffered: this.hist.length,
+      ms: { track: tTrack, server: this.serverMs, total: performance.now() - now } });
   };
+  private serverMs = 0;
 
   private draw(hands: TrackHand[], g: GateOutput) {
     const c = this.o.canvas; if (!c) return;
@@ -61,4 +81,10 @@ export class Engine {
       for (const p of h.landmarks) { const [x, y] = px(p); ctx.beginPath(); ctx.arc(x, y, 4.5 * dpr, 0, 6.2832); ctx.fillStyle = "#0D9488"; ctx.fill(); ctx.lineWidth = 1.5 * dpr; ctx.strokeStyle = "#fff"; ctx.stroke(); }
     }
   }
+}
+
+function average(rows: Float64Array[]): Float64Array {
+  const out = new Float64Array(rows[0].length);
+  for (const r of rows) for (let i = 0; i < r.length; i++) out[i] += r[i] / rows.length;
+  return out;
 }

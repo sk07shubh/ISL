@@ -6,12 +6,12 @@ const TASK = "/mediapipe/hand_landmarker.task", WASM = "/mediapipe/wasm";
 let p: Promise<Tracker> | null = null;
 export const resetTracker = () => { p = null; };
 
-/** Self-hosted MediaPipe HandLandmarker, two hands (the SignLens ISL model reads up to two). GPU first, CPU fallback. */
+/** MediaPipe HandLandmarker (the same model file the teammate's live script uses), up to two hands. */
 export function getTracker(): Promise<Tracker> {
   return (p ??= (async () => {
     const head = await fetch(TASK, { method: "HEAD" }).catch(() => null);
-    if (!head || !head.ok || (head.headers.get("content-type") || "").includes("text/html"))
-      throw new AppError("missing_file", "mediapipe/hand_landmarker.task", "Missing file: mediapipe/hand_landmarker.task. Run  python scripts/fetch_assets.py  once (needs internet), then check again.");
+    if (!head || !head.ok)
+      throw new AppError("missing_file", "model/hand_landmarker.task", "model/hand_landmarker.task is missing from the project folder.");
     let fileset;
     try { fileset = await FilesetResolver.forVisionTasks(WASM); }
     catch { throw new AppError("missing_file", "mediapipe/wasm", "Missing tracker runtime files in mediapipe/wasm."); }
@@ -26,11 +26,11 @@ export function getTracker(): Promise<Tracker> {
           delegate,
           detect(video, ts) {
             const r: any = lm.detectForVideo(video, ts);
-            const hs = (r.landmarks ?? []).map((l: any[], i: number) => {
+            const hands = (r.landmarks ?? []).map((l: any[], i: number) => {
               const cat = (r.handedness ?? r.handednesses)?.[i]?.[0];
               return { landmarks: l.map((q) => [q.x, q.y, q.z] as Landmark), hand: (cat?.categoryName === "Left" ? "Left" : "Right") as Handedness, score: cat?.score ?? 1 };
             });
-            return { hands: hs };
+            return { hands } as TrackResult;
           },
         } as Tracker;
       } catch (e) { lastErr = e; }
