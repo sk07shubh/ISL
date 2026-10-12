@@ -1,0 +1,9 @@
+node_modules/
+frontend/dist/
+backend/data/isl.db*
+__pycache__/
+*.pyc
+.venv/
+mediapipe/hand_landmarker.task
+model/isl_landmarks_weights.json
+model/*.png

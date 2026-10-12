@@ -1,0 +1,272 @@
+{
+ "source": "https://huggingface.co/venmugilrajan/SignLens-Landmark-Model",
+ "license": "apache-2.0",
+ "author": "Venmugil Rajan",
+ "self_reported": true,
+ "note": "Block-split held-out test (contiguous 100-frame blocks). This is NOT a held-out-signer test. Numbers are the model author's, not ours.",
+ "model": {
+  "name": "SignLens ISL Dual-Hand",
+  "file": "isl_landmarks_weights.json",
+  "architecture": "MLP (512, 256, 128) ReLU",
+  "input_dim": 156,
+  "classes": 35,
+  "train_samples": 10740
+ },
+ "summary": {
+  "accuracy": 0.9805,
+  "macro_precision": 0.9806,
+  "macro_recall": 0.9766,
+  "macro_f1": 0.9731,
+  "weighted_f1": 0.9789,
+  "n_test": 8865,
+  "realistic_low": 0.965,
+  "realistic_high": 0.98
+ },
+ "per_class": [
+  {
+   "key": "1",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 400
+  },
+  {
+   "key": "2",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 400
+  },
+  {
+   "key": "3",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 400
+  },
+  {
+   "key": "4",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 400
+  },
+  {
+   "key": "5",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 400
+  },
+  {
+   "key": "6",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 400
+  },
+  {
+   "key": "7",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 400
+  },
+  {
+   "key": "8",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 400
+  },
+  {
+   "key": "9",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 400
+  },
+  {
+   "key": "A",
+   "precision": 0.9901,
+   "recall": 1.0,
+   "f1": 0.995,
+   "support": 200
+  },
+  {
+   "key": "B",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 200
+  },
+  {
+   "key": "C",
+   "precision": 1.0,
+   "recall": 0.9911,
+   "f1": 0.9955,
+   "support": 112
+  },
+  {
+   "key": "D",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 200
+  },
+  {
+   "key": "E",
+   "precision": 0.9009,
+   "recall": 1.0,
+   "f1": 0.9479,
+   "support": 200
+  },
+  {
+   "key": "F",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 200
+  },
+  {
+   "key": "G",
+   "precision": 1.0,
+   "recall": 0.985,
+   "f1": 0.9924,
+   "support": 200
+  },
+  {
+   "key": "H",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 200
+  },
+  {
+   "key": "I",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 120
+  },
+  {
+   "key": "J",
+   "precision": 1.0,
+   "recall": 0.9555,
+   "f1": 0.9772,
+   "support": 382
+  },
+  {
+   "key": "K",
+   "precision": 0.9852,
+   "recall": 1.0,
+   "f1": 0.9926,
+   "support": 200
+  },
+  {
+   "key": "L",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 400
+  },
+  {
+   "key": "M",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 200
+  },
+  {
+   "key": "N",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 200
+  },
+  {
+   "key": "O",
+   "precision": 0.9836,
+   "recall": 1.0,
+   "f1": 0.9917,
+   "support": 120
+  },
+  {
+   "key": "P",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 197
+  },
+  {
+   "key": "Q",
+   "precision": 0.997,
+   "recall": 0.9882,
+   "f1": 0.9926,
+   "support": 338
+  },
+  {
+   "key": "R",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 9
+  },
+  {
+   "key": "S",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 103
+  },
+  {
+   "key": "T",
+   "precision": 1.0,
+   "recall": 0.355,
+   "f1": 0.524,
+   "support": 200
+  },
+  {
+   "key": "U",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 364
+  },
+  {
+   "key": "V",
+   "precision": 0.8759,
+   "recall": 1.0,
+   "f1": 0.9339,
+   "support": 120
+  },
+  {
+   "key": "W",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 200
+  },
+  {
+   "key": "X",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 200
+  },
+  {
+   "key": "Y",
+   "precision": 0.5896,
+   "recall": 0.905,
+   "f1": 0.714,
+   "support": 200
+  },
+  {
+   "key": "Z",
+   "precision": 1.0,
+   "recall": 1.0,
+   "f1": 1.0,
+   "support": 200
+  }
+ ]
+}
