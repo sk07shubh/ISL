@@ -74,3 +74,12 @@ The repo includes a `Dockerfile`. The container starts `scripts/run.py`, which l
 - Set `ISL_DB=/data/isl.db` and attach a persistent volume at `/data`, so live-test results survive restarts.
 - Check the service with `GET /health`. It reports the model files and the parity check.
 - Camera access in the browser needs HTTPS. Most platforms provide this automatically.
+
+## Android app (mobile/)
+An Expo app that opens the hosted website in an Android WebView, with camera access. Build an APK with EAS:
+```
+cd mobile && npm install
+npx eas-cli login && npx eas-cli init
+npx eas-cli build -p android --profile preview
+```
+Set your Railway address in `mobile/eas.json` first. See `mobile/README.md`. Recognition still runs on the server, so this version has the network latency described above.
