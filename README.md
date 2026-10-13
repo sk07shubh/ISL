@@ -57,3 +57,9 @@ Live tests (**Live test** page) record, for every letter asked: what the app sho
 - **Risk-coverage**: how coverage, precision, and wrong-shown rate change with the confidence threshold. The recommended threshold is the one with the most coverage that keeps wrong-shown under the target (needs at least 20 attempts).
 - **Calibration (ECE)**: within each confidence band, the gap between stated confidence and how often the top prediction was right.
 - **Conditions**: accuracy broken down by signer, lighting, distance (recorded by the tester), hand size, and measured brightness. The hand-size and brightness bands are provisional and should be tuned on real data.
+
+## Hosting
+The repo includes a `Dockerfile`. The container starts `scripts/run.py`, which listens on the `PORT` that the hosting platform provides.
+- Set `ISL_DB=/data/isl.db` and attach a persistent volume at `/data`, so live-test results survive restarts.
+- Check the service with `GET /health`. It reports the model files and the parity check.
+- Camera access in the browser needs HTTPS. Most platforms provide this automatically.
