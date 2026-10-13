@@ -1,29 +1,30 @@
-# ISL Interpreter — Android app
+# ISL Interpreter — React Native app
 
-This app opens the hosted ISL Interpreter website in an Android WebView, with camera access.
-It needs the backend (Railway) to be running.
+The same interpreter as the website, as a native Android and iOS app (Expo). It talks to the same backend.
 
-## One-time setup
-1. Install Node.js LTS, then in this folder: `npm install`
-2. Create a free Expo account at expo.dev, then `npx eas-cli login`
-3. Run `npx eas-cli init` once. It fills in `extra.eas.projectId` in `app.json`.
-4. In `eas.json`, replace `https://REPLACE-WITH-YOUR-RAILWAY-URL` with your Railway address.
+## What's in it
+- **Interpreter**: camera, recognised sign with hold ring, top 3 predictions, sentence box (Speak / Space / Delete / Clear), "Signs I know", settings.
+- **Live test**: guided test with lighting and distance notes, saved to the backend.
+- **Model & results**: accuracy, wrong-sign rate, answered share, safety chart, per-sign results, calibration, runs.
+- Sign rules are the same as the website and `training/live_clean.py`: `src/lib/combine.ts`, `src/lib/gate.ts`, `src/lib/recognizer.ts`. Their unit tests run with `npm test`.
 
-## Build an APK
+## What is NOT built yet
+**On-phone hand tracking.** Recognition needs 21 hand points per hand from each camera frame. The website gets them from MediaPipe in the browser. A phone app needs a native MediaPipe module (Android/iOS) that exposes the same points. That module is the one missing piece; it's defined as an interface in `src/tracking/handTracker.ts`. Until it's added, the camera shows, but signs are not recognised and the app says so.
+
+## Set up
+1. Install Node.js LTS. In this folder: `npm install`
+2. Set the backend address in `eas.json` (`EXPO_PUBLIC_API_URL`), e.g. your Railway URL.
+3. For a quick try on a phone: `npx expo start`, then scan the QR code with Expo Go.
+
+## Build with EAS
 ```
-npx eas-cli build -p android --profile preview
+npx eas-cli login
+npx eas-cli init                              # fills in extra.eas.projectId
+npx eas-cli build -p android --profile preview     # APK for testing
+npx eas-cli build -p android --profile production  # AAB for the Play Store
 ```
-EAS builds in the cloud and gives you a download link for the APK. Install it on an Android phone.
-Use `--profile production` for an Android App Bundle (AAB) for the Play Store.
 
-## Test on your phone before building
-```
-npx expo start
-```
-Scan the QR code with the Expo Go app. Expo Go uses the URL in `EXPO_PUBLIC_APP_URL`, so set it in your shell first:
-`EXPO_PUBLIC_APP_URL=https://your-railway-url npx expo start`
-
-## Limits of this version
-- Recognition still runs on the server, so each frame waits for a network round trip.
-  See the latency notes: the on-device version is the next step for faster conversation.
-- The app is the web interface, so camera behaviour depends on Android WebView. Test on a real phone.
+## Checks
+- `npm run typecheck` — TypeScript
+- `npm test` — sign rules and sentence logic
+- `npx expo export --platform android --output-dir /tmp/out` — bundles the app for Android (done in the repo's setup)

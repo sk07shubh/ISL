@@ -9,3 +9,5 @@ env/
 # frontend build tools (the built dist/ IS committed so the app runs without Node)
 frontend/node_modules/
 data/
+mobile/.expo/
+mobile/dist/
