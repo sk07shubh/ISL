@@ -5,7 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { SettingsProvider } from "./src/state";
 import { InterpreterScreen } from "./src/screens/InterpreterScreen";
 import { LiveTestScreen } from "./src/screens/LiveTestScreen";
-import { ResultsScreen } from "./src/screens/ResultsScreen";
+import { HistoryScreen } from "./src/screens/HistoryScreen";
 import { C } from "./src/theme";
 
 const Tabs = createBottomTabNavigator();
@@ -23,7 +23,7 @@ export default function App() {
           }}>
             <Tabs.Screen name="Interpreter" component={InterpreterScreen} options={{ tabBarIcon: () => null, tabBarLabel: "Interpreter" }} />
             <Tabs.Screen name="Live test" component={LiveTestScreen} />
-            <Tabs.Screen name="Model & results" component={ResultsScreen} />
+            <Tabs.Screen name="History" component={HistoryScreen} />
           </Tabs.Navigator>
         </NavigationContainer>
       </SettingsProvider>

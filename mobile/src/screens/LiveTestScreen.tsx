@@ -8,7 +8,8 @@ import { C, S, R } from "../theme";
 import { useModel } from "../lib/useModel";
 import { useRecognition } from "../lib/useRecognition";
 import { HandCamera, type HandFrame } from "../tracking/HandCamera";
-import { saveTest, type Attempt, type Mode, type TestMeta } from "../lib/api";
+import { type Attempt, type Mode } from "../lib/api";
+import { addTest } from "../lib/history";
 import type { GateOutput, VocabEntry } from "../lib/types";
 import { Header } from "../components/Header";
 
@@ -37,7 +38,8 @@ export function LiveTestScreen() {
   const [elapsed, setElapsed] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [saved, setSaved] = useState<"idle" | "saving" | "ok" | "err">("idle");
-  const startedAt = useRef(0), lock = useRef(false), meta = useRef<TestMeta>({ tester: "anon" });
+  const startedAt = useRef(0), lock = useRef(false), meta = useRef<{ tester: string; what: Mode; lighting: string | null; distance: string | null; labels: string[] }>({ tester: "anon", what: "all", lighting: null, distance: null, labels: [] });
+  const [savedNumber, setSavedNumber] = useState<number | null>(null);
   const cur = useRef({ phase, queue, idx, attempts }); cur.current = { phase, queue, idx, attempts };
 
   const byKey = useMemo(() => new Map(signs.map((v) => [v.key, v])), [signs]);
@@ -82,15 +84,21 @@ export function LiveTestScreen() {
     return () => clearInterval(iv);
   }, [phase, idx]);
 
+  // A finished test is saved on the phone as the next numbered test.
   useEffect(() => {
     if (phase !== "done" || !cur.current.attempts.length) return;
     setSaved("saving");
-    saveTest(meta.current, cur.current.attempts).then(() => setSaved("ok")).catch(() => setSaved("err"));
+    addTest({
+      what: meta.current.what, lighting: meta.current.lighting, distance: meta.current.distance, tester: meta.current.tester,
+      labels: meta.current.labels, threshold: info?.gate.threshold ?? 0.8,
+      rows: cur.current.attempts.map((a) => ({ ...a, lighting: meta.current.lighting, distance: meta.current.distance })),
+    }).then((n) => { setSavedNumber(n); setSaved("ok"); }).catch(() => setSaved("err"));
   }, [phase]);
 
 
   const start = () => {
-    meta.current = { tester: name.trim() || "anon", lighting: light as TestMeta["lighting"], distance: dist as TestMeta["distance"] };
+    meta.current = { tester: name.trim() || "anon", what: testMode, lighting: light, distance: dist, labels: pool.map((p) => p.key) };
+    setSavedNumber(null);
     setQueue(pool.map((p) => p.key).sort(() => Math.random() - 0.5));
     setIdx(0); setAttempts([]); setSaved("idle"); lock.current = false; reset(); setPhase("run");
   };
@@ -153,7 +161,7 @@ export function LiveTestScreen() {
             <Stat value={String(wrong)} label="wrong shown" />
             <Stat value={String(unsure)} label="unsure" />
           </View>
-          <Text style={st.muted}>{saved === "saving" ? "Saving…" : saved === "ok" ? "Saved. See Model & results." : saved === "err" ? "Could not save. Check the connection." : ""}</Text>
+          <Text style={st.muted}>{saved === "saving" ? "Saving…" : saved === "ok" ? `Saved as Test ${savedNumber}. See History.` : saved === "err" ? "Could not save on this phone." : ""}</Text>
         </Card>
         <Btn label="Run another test" kind="primary" onPress={() => setPhase("setup")} />
       </>)}
