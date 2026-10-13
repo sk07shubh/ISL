@@ -1,26 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { spellSign, spellOut, insertAt, deleteBefore, deleteAfter, wordCount } from "./sentence";
+import { spellSign, speakableSentence, insertAt, deleteBefore, deleteAfter, wordCount } from "./sentence";
 
-describe("spelling is direct and consistent", () => {
-  it("letters use one fixed sound each, no 'letter' prefix", () => {
+describe("speech is whole words, read once", () => {
+  it("a letter is spoken as one short sound, lower case", () => {
     expect(spellSign({ key: "A", kind: "letter" })).toBe("ay");
-    expect(spellSign({ key: "B", kind: "letter" })).toBe("bee");
-    expect(spellSign({ key: "b", kind: "letter" })).toBe("bee");       // lower case gives the same sound
-    expect(spellSign({ key: "W", kind: "letter" })).toBe("double you");
+    expect(spellSign({ key: "b", kind: "letter" })).toBe("bee");
   });
   it("digits are spoken as numbers", () => {
     expect(spellSign({ key: "7", kind: "digit" })).toBe("seven");
   });
   it("words are spoken as words", () => {
-    expect(spellSign({ key: "hello", kind: "word", speak: "hello" })).toBe("hello");
+    expect(spellSign({ key: "hello", kind: "word", speak: "Hello" })).toBe("hello");
   });
-  it("spellOut spells every letter and pauses between words", () => {
-    expect(spellOut("hi there")).toBe("aitch eye, tee aitch ee ar ee");
-    expect(spellOut("  ab  ")).toBe("ay bee");
-    expect(spellOut("")).toBe("");
-  });
-  it("spellOut includes digits and ignores punctuation", () => {
-    expect(spellOut("A1!")).toBe("ay one");
+  it("the sentence is lower case so it is read as words, not as letters", () => {
+    expect(speakableSentence("HELLO WORLD")).toBe("hello world");
+    expect(speakableSentence("  good   morning ")).toBe("good morning");
+    expect(speakableSentence("")).toBe("");
   });
 });
 

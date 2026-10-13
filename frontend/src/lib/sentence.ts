@@ -15,23 +15,17 @@ export interface SpeakableSign { key: string; kind?: "letter" | "digit" | "word"
 
 /** The spoken form of one recognised sign. */
 export function spellSign(s: SpeakableSign): string {
-  if (s.kind === "word") return s.speak || s.key.toLowerCase();
+  if (s.kind === "word") return (s.speak || s.key).toLowerCase();
   if (s.kind === "digit" || /^[0-9]$/.test(s.key)) return DIGIT_SOUND[Number(s.key)] ?? s.key;
-  return LETTER_SOUND[s.key.toUpperCase()] ?? s.key.toLowerCase();
+  return (LETTER_SOUND[s.key.toUpperCase()] ?? s.key).toLowerCase();
 }
 
-/** The spoken form of the whole editor text: letters spelled one by one, words separated by a short pause. */
-export function spellOut(text: string): string {
-  return text
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => [...word.toUpperCase()]
-      .map((ch) => (/[0-9]/.test(ch) ? DIGIT_SOUND[Number(ch)] : LETTER_SOUND[ch]))
-      .filter(Boolean)
-      .join(" "))
-    .filter(Boolean)
-    .join(", ");
+/**
+ * Speech for the whole sentence: each word is read as a WORD, once, in lowercase.
+ * Upper-case text makes many speech engines read letters one by one ("H-E-L-L-O"), so we lowercase it first.
+ */
+export function speakableSentence(text: string): string {
+  return text.trim().toLowerCase().split(/\s+/).filter(Boolean).join(" ");
 }
 
 export interface Edit { text: string; caret: number }

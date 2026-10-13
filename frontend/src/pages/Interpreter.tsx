@@ -4,7 +4,7 @@ import { Stage, type StageState } from "../components/Stage";
 import { useSettings } from "../lib/settings";
 import { loadVocab, loadModel } from "../lib/runtime";
 import { speak } from "../lib/speech";
-import { spellOut, spellSign, insertAt, deleteBefore, wordCount } from "../lib/sentence";
+import { speakableSentence, spellSign, insertAt, deleteBefore, wordCount } from "../lib/sentence";
 import { reasonText } from "../lib/gate";
 import type { Mode } from "../lib/api";
 import type { FrameInfo } from "../lib/engine";
@@ -43,7 +43,6 @@ export function Interpreter() {
     const ta = taRef.current;
     if (ta && caretRef.current !== null && document.activeElement === ta) ta.setSelectionRange(caretRef.current, caretRef.current);
   }, [text]);
-  const focusEditor = () => { const ta = taRef.current; if (ta) { ta.focus(); } };
 
   const insert = useCallback((ins: string) => {
     applyEdit(insertAt(textRef.current, caretRef.current, ins));
@@ -51,7 +50,7 @@ export function Interpreter() {
   const doSpace = () => insert(" ");
   const doBack = () => applyEdit(deleteBefore(textRef.current, caretRef.current));
   const doClear = () => setText("", 0);
-  const doSpell = () => speak(spellOut(textRef.current), "en", s.voiceURI);
+  const doSpeak = () => speak(speakableSentence(textRef.current), "en", s.voiceURI);
 
   // ---- real-time: a recognised sign goes into the editor and is spelled out at once
   const onCommit = useCallback((label: string) => {
@@ -61,7 +60,7 @@ export function Interpreter() {
     const sett = settingsRef.current;
     const addSpace = kind === "word" || sett.autoSpace;
     insert(addSpace ? shown + " " : shown);
-    if (sett.speakEach) speak(spellSign({ key: label, kind, speak: entry?.speak }), "en", sett.voiceURI);
+    if (sett.speakEach) speak(spellSign({ key: label, kind, speak: entry?.speak }), "en", sett.voiceURI);   // once, this sign only
   }, [byKey, mode, insert]);
 
   const onView = useCallback((f: FrameInfo | null) => {
@@ -77,11 +76,11 @@ export function Interpreter() {
     const h = (e: KeyboardEvent) => {
       const el = document.activeElement as HTMLElement | null;
       if ((el && (["INPUT", "SELECT", "TEXTAREA", "BUTTON", "A"].includes(el.tagName) || el.isContentEditable)) || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "Enter") { e.preventDefault(); doSpell(); }
+      if (e.key === "Enter") { e.preventDefault(); doSpeak(); }
       else if (e.key === " ") { e.preventDefault(); doSpace(); }
       else if (e.key === "Backspace") { e.preventDefault(); doBack(); }
-      else if (e.key === "Delete") { e.preventDefault(); doClear(); }
-      else if (e.key.toLowerCase() === "d") setDev((d) => !d);
+      else if (e.key.toLowerCase() === "d" && !e.shiftKey) setDev((d) => !d);
+      else if (e.key.length === 1) e.preventDefault();          // no typing letters or digits: only recognition adds signs
     };
     window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
   });
@@ -163,20 +162,17 @@ export function Interpreter() {
           <div className="card sentence">
             <header><h3><Icon name="type" size={20} /> Sentence</h3><span className="muted small">{words} {words === 1 ? "word" : "words"}</span></header>
             <textarea
-              ref={taRef} className="sentence-input"
-              value={text} rows={3} spellCheck={false} aria-label="Sentence editor. Recognised signs appear here; you can edit like normal text."
-              placeholder="Signs you hold steady appear here. You can type, delete and correct them as in any text editor."
-              onChange={(e) => setText(e.target.value, e.target.selectionStart)}
-              onSelect={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
-              onClick={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
-              onKeyUp={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); doSpell(); } }}
+              ref={taRef} className="sentence-input" readOnly tabIndex={-1}
+              value={text} rows={3} spellCheck={false}
+              aria-label="Sentence. Filled in by hand recognition. Space adds a space and Backspace deletes."
+              placeholder="Signs you hold steady appear here. Space adds a space, Backspace deletes."
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); doSpeak(); } }}
             />
             <div className="btn-row">
-              <button className="btn btn-primary" onClick={doSpell} disabled={!text.trim()} title="Spell out the whole sentence"><Icon name="speaker" size={18} /> Spell out <kbd>Enter</kbd></button>
-              <button className="btn btn-secondary" onClick={() => { doSpace(); focusEditor(); }}><Icon name="space" size={18} /> Space <kbd>␣</kbd></button>
-              <button className="btn btn-secondary" onClick={() => { doBack(); focusEditor(); }} disabled={!text.length}><Icon name="backspace" size={18} /> Delete <kbd>⌫</kbd></button>
-              <button className="btn btn-danger" onClick={doClear} disabled={!text.length}><Icon name="trash" size={18} /> Clear <kbd>Del</kbd></button>
+              <button className="btn btn-primary" onClick={doSpeak} disabled={!text.trim()} title="Speak the sentence, word by word"><Icon name="speaker" size={18} /> Speak <kbd>Enter</kbd></button>
+              <button className="btn btn-secondary" onClick={doSpace}><Icon name="space" size={18} /> Space <kbd>␣</kbd></button>
+              <button className="btn btn-secondary" onClick={doBack} disabled={!text.length}><Icon name="backspace" size={18} /> Delete <kbd>⌫</kbd></button>
+              <button className="btn btn-danger" onClick={doClear} disabled={!text.length}><Icon name="trash" size={18} /> Clear</button>
             </div>
           </div>
         </section>
