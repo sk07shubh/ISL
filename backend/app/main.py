@@ -83,7 +83,8 @@ def model_info():
 def vocabulary(mode: Literal["alphabet", "digit"] = "alphabet"):
     h = _head(mode)
     cat = "Numerals" if mode == "digit" else "Alphabet"
-    signs = [{"key": k, "name": {"en": k}, "names": {"en": k}, "short": k, "category": cat, "description": "",
+    kind = "digit" if mode == "digit" else "letter"
+    signs = [{"key": k, "kind": kind, "name": {"en": k}, "names": {"en": k}, "short": k, "category": cat, "description": "",
               "image": "", "verified": False, "active": True, "note": ""} for k in h.labels]
     return {"mode": mode, "signs": signs}
 

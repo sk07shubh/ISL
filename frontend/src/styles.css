@@ -152,3 +152,9 @@ input[type=text], input:not([type]), select { height: 44px; padding: 0 12px; bor
 @media (max-width: 1360px) { .interp-grid, .interp-grid.rail-open { grid-template-columns: minmax(0, 1fr) 400px; } .interp-grid.rail-open .rail { grid-column: 1 / -1; position: static; max-height: 360px; } .word { font-size: 68px; line-height: 72px; } .stat-num { font-size: 46px; } .nav { padding: 0 20px; } .page { padding: 20px; } }
 @media (max-width: 1000px) { .interp-grid, .interp-grid.rail-open, .test-grid, .two-col { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr 1fr; } .mini-stats.wide { grid-template-columns: 1fr 1fr; } .pipeline { grid-template-columns: 1fr 1fr; } .p-arrow { display: none; } .nav .seg a span { display: none; } }
 @media print { .nav, .btn, .toolbar { display: none !important; } .page { padding: 0; } .card { box-shadow: none; break-inside: avoid; } }
+
+/* sentence editor: a real text box, styled like the old display */
+.sentence-input { display: block; width: 100%; min-height: 128px; resize: vertical; padding: 16px 18px; background: var(--surface-2); border: 1px solid var(--surface-3); border-radius: 12px;
+  font: 700 34px/44px var(--body); letter-spacing: .01em; color: var(--text); margin-bottom: 14px; overflow-wrap: anywhere; }
+.sentence-input::placeholder { font: 400 16px/24px var(--body); color: var(--text-3); }
+.sentence-input:focus { outline: 3px solid var(--focus); outline-offset: 0; border-color: var(--primary); }

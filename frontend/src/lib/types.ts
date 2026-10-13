@@ -4,6 +4,7 @@ export interface TrackHand { landmarks: Landmark[]; hand: Handedness; score: num
 export interface TrackResult { hands: TrackHand[] }
 
 export interface VocabEntry {
+  kind: "letter" | "digit" | "word"; speak?: string;
   key: string; name: string; names: { en: string; hi?: string; mr?: string }; short: string; category: string;
   description: string; image: string; verified: boolean; active: boolean; note: string;
 }

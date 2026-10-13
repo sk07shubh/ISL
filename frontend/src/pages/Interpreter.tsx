@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Bar, Chip, Icon, Ring, pct } from "../components/ui";
 import { Stage, type StageState } from "../components/Stage";
 import { useSettings } from "../lib/settings";
 import { loadVocab, loadModel } from "../lib/runtime";
-import { speak, type LangCode } from "../lib/speech";
+import { speak } from "../lib/speech";
+import { spellOut, spellSign, insertAt, deleteBefore, wordCount } from "../lib/sentence";
 import { reasonText } from "../lib/gate";
 import type { Mode } from "../lib/api";
 import type { FrameInfo } from "../lib/engine";
 import type { ModelInfo, VocabEntry } from "../lib/types";
 
-const SPACE = " ";
 
 export function Interpreter() {
   const { s, setOpen } = useSettings();
@@ -18,28 +18,51 @@ export function Interpreter() {
   const [info, setInfo] = useState<ModelInfo | null>(null);
   const [view, setView] = useState<FrameInfo | null>(null);
   const [stage, setStage] = useState<StageState | null>(null);
-  const [tokens, setTokens] = useState<string[]>([]);
-  const [flash, setFlash] = useState(0);
+  const [text, setTextState] = useState("");
+  const textRef = useRef("");
+  const caretRef = useRef<number | null>(null);          // null = end of text
+  const taRef = useRef<HTMLTextAreaElement>(null);
   const [railOpen, setRailOpen] = useState(() => window.innerWidth >= 1600);
   const [q, setQ] = useState("");
   const [target, setTarget] = useState<string | null>(null);
   const [dev, setDev] = useState(false);
   const perf = useRef({ n: 0, sum: 0 });
+  const settingsRef = useRef(s); settingsRef.current = s;
 
   useEffect(() => { loadModel().then(setInfo).catch(() => {}); }, []);
   useEffect(() => { loadVocab(mode).then((v) => setSigns(v.signs)).catch(() => setSigns([])); }, [mode]);
-  useEffect(() => { setTokens([]); setView(null); }, [mode]);
+  useEffect(() => { setView(null); }, [mode]);
   const byKey = useMemo(() => new Map(signs.map((v) => [v.key, v])), [signs]);
-  const nameOf = useCallback((key: string | null | undefined, lang: LangCode = s.lang): string => {
-    if (!key) return ""; const v = byKey.get(key); return v ? (v.names[lang] || v.names.en) : key;
-  }, [byKey, s.lang]);
-  const sentence = tokens.map((k) => (k === SPACE ? SPACE : (byKey.get(k)?.short ?? k) + SPACE)).join("");
-  const spoken = tokens.map((k) => (k === SPACE ? SPACE : nameOf(k) + SPACE)).join("");
 
+  // ---- the sentence editor: one text box, edited like any normal text editor
+  const setText = useCallback((next: string, caret: number | null) => {
+    textRef.current = next; caretRef.current = caret; setTextState(next);
+  }, []);
+  const applyEdit = useCallback((e: { text: string; caret: number }) => setText(e.text, e.caret), [setText]);
+  useLayoutEffect(() => {                                  // keep the caret where the edit put it
+    const ta = taRef.current;
+    if (ta && caretRef.current !== null && document.activeElement === ta) ta.setSelectionRange(caretRef.current, caretRef.current);
+  }, [text]);
+  const focusEditor = () => { const ta = taRef.current; if (ta) { ta.focus(); } };
+
+  const insert = useCallback((ins: string) => {
+    applyEdit(insertAt(textRef.current, caretRef.current, ins));
+  }, [applyEdit]);
+  const doSpace = () => insert(" ");
+  const doBack = () => applyEdit(deleteBefore(textRef.current, caretRef.current));
+  const doClear = () => setText("", 0);
+  const doSpell = () => speak(spellOut(textRef.current), "en", s.voiceURI);
+
+  // ---- real-time: a recognised sign goes into the editor and is spelled out at once
   const onCommit = useCallback((label: string) => {
-    setTokens((t) => [...t, label]); setFlash((n) => n + 1);
-    if (s.speakEach) speak(nameOf(label), s.lang, s.voiceURI);
-  }, [s.speakEach, s.lang, s.voiceURI, nameOf]);
+    const entry = byKey.get(label);
+    const kind = entry?.kind ?? (mode === "digit" ? "digit" : "letter");
+    const shown = kind === "word" ? (entry?.speak || entry?.short || label) : (entry?.short ?? label);
+    const sett = settingsRef.current;
+    const addSpace = kind === "word" || sett.autoSpace;
+    insert(addSpace ? shown + " " : shown);
+    if (sett.speakEach) speak(spellSign({ key: label, kind, speak: entry?.speak }), "en", sett.voiceURI);
+  }, [byKey, mode, insert]);
 
   const onView = useCallback((f: FrameInfo | null) => {
     setView(f);
@@ -49,22 +72,19 @@ export function Interpreter() {
     }
   }, []);
 
-  const doSpeak = () => speak(spoken, s.lang, s.voiceURI);
-  const doSpace = () => setTokens((t) => (t.length ? [...t, SPACE] : t));
-  const doBack = () => setTokens((t) => t.slice(0, -1));
-  const doClear = () => setTokens([]);
+  // keyboard: when the editor is not focused, Enter / Space / Backspace / Delete act on the sentence
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const el = document.activeElement as HTMLElement | null;
       if ((el && (["INPUT", "SELECT", "TEXTAREA", "BUTTON", "A"].includes(el.tagName) || el.isContentEditable)) || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === "Enter") { e.preventDefault(); speak(spoken, s.lang, s.voiceURI); }
+      if (e.key === "Enter") { e.preventDefault(); doSpell(); }
       else if (e.key === " ") { e.preventDefault(); doSpace(); }
       else if (e.key === "Backspace") { e.preventDefault(); doBack(); }
       else if (e.key === "Delete") { e.preventDefault(); doClear(); }
       else if (e.key.toLowerCase() === "d") setDev((d) => !d);
     };
     window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
-  }, [spoken, s.lang, s.voiceURI]);
+  });
 
   const g = view?.gate ?? null;
   const live = g?.state === "recognised" && g.label ? g.label : null;
@@ -73,6 +93,7 @@ export function Interpreter() {
   const holdSec = g ? (g.holdProgress * g.holdMs) / 1000 : 0;
   const filtered = signs.filter((v) => (v.name + " " + v.short + " " + v.category).toLowerCase().includes(q.toLowerCase()));
   const hasDigits = !!info?.digit;
+  const words = wordCount(text);
 
   let hint = "Show your hand to the camera";
   if (phase !== "ready") hint = phase === "loading" ? "Getting ready…" : "Fix the message on the video to continue";
@@ -86,10 +107,10 @@ export function Interpreter() {
         {hasDigits && (
           <div className="segmented sm mode-toggle" role="radiogroup" aria-label="Recognition mode">
             <button role="radio" aria-checked={mode === "alphabet"} className={mode === "alphabet" ? "on" : ""} onClick={() => setMode("alphabet")}>Letters A–Z</button>
-            <button role="radio" aria-checked={mode === "digit"} className={mode === "digit" ? "on" : ""} onClick={() => setMode("digit")}>Digits 1–9</button>
+            <button role="radio" aria-checked={mode === "digit"} className={mode === "digit" ? "on" : ""} onClick={() => setMode("digit")}>Digits 0–9</button>
           </div>
         )}
-        {target && <div className={`practice ${matched ? "ok" : ""}`}><Icon name={matched ? "check" : "target"} size={18} />{matched ? <>Matched <b>{nameOf(target)}</b></> : <>Try to show <b>{nameOf(target)}</b></>}
+        {target && <div className={`practice ${matched ? "ok" : ""}`}><Icon name={matched ? "check" : "target"} size={18} />{matched ? <>Matched <b>{byKey.get(target)?.name}</b></> : <>Try to show <b>{byKey.get(target)?.name}</b></>}
           <button className="link" onClick={() => setTarget(null)} aria-label="Clear target"><Icon name="x" size={14} /></button></div>}
         <div className="grow" />
         {info && (info.parity.ok ? <Chip kind="ok">Matches training code</Chip> : <Chip kind="err">Parity check failed</Chip>)}
@@ -105,14 +126,14 @@ export function Interpreter() {
               {filtered.map((v) => <SignTile key={v.key} v={v} live={live === v.key} target={target === v.key} onPick={() => setTarget(target === v.key ? null : v.key)} />)}
               {!filtered.length && <p className="muted">No sign matches “{q}”.</p>}
             </div>
-            <footer className="small muted">Tap a tile to practise it. Hold the sign steady for about half a second to add it to the sentence.</footer>
+            <footer className="small muted">Tap a tile to practise it. Hold a sign steady for about half a second to add it to the sentence.</footer>
           </aside>
         )}
 
         <section className="center">
           <Stage mode={mode} onView={onView} onCommit={onCommit} onState={setStage}
             overlay={(f) => dev && <DevOverlay f={f} info={info} mode={mode} />} />
-          <PipelineStrip f={view} info={info} mode={mode} words={tokens.filter((t) => t !== SPACE).length} />
+          <PipelineStrip f={view} info={info} mode={mode} words={words} />
         </section>
 
         <section className="right">
@@ -140,14 +161,22 @@ export function Interpreter() {
           </div>
 
           <div className="card sentence">
-            <header><h3><Icon name="type" size={20} /> Sentence</h3><span className="muted small">{tokens.filter((t) => t !== SPACE).length} signs</span></header>
-            <div className="sentence-box" key={flash} data-flash={flash > 0}>
-              {sentence ? <span>{sentence}</span> : <span className="muted">Signs you hold steady appear here.</span>}<i className="caret" /></div>
+            <header><h3><Icon name="type" size={20} /> Sentence</h3><span className="muted small">{words} {words === 1 ? "word" : "words"}</span></header>
+            <textarea
+              ref={taRef} className="sentence-input"
+              value={text} rows={3} spellCheck={false} aria-label="Sentence editor. Recognised signs appear here; you can edit like normal text."
+              placeholder="Signs you hold steady appear here. You can type, delete and correct them as in any text editor."
+              onChange={(e) => setText(e.target.value, e.target.selectionStart)}
+              onSelect={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
+              onClick={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
+              onKeyUp={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); doSpell(); } }}
+            />
             <div className="btn-row">
-              <button className="btn btn-primary" onClick={doSpeak} disabled={!sentence.trim()}><Icon name="speaker" size={18} /> Speak <kbd>Enter</kbd></button>
-              <button className="btn btn-secondary" onClick={doSpace}><Icon name="space" size={18} /> Space <kbd>␣</kbd></button>
-              <button className="btn btn-secondary" onClick={doBack} disabled={!tokens.length}><Icon name="backspace" size={18} /> Back <kbd>⌫</kbd></button>
-              <button className="btn btn-danger" onClick={doClear} disabled={!tokens.length}><Icon name="trash" size={18} /> Clear <kbd>Del</kbd></button>
+              <button className="btn btn-primary" onClick={doSpell} disabled={!text.trim()} title="Spell out the whole sentence"><Icon name="speaker" size={18} /> Spell out <kbd>Enter</kbd></button>
+              <button className="btn btn-secondary" onClick={() => { doSpace(); focusEditor(); }}><Icon name="space" size={18} /> Space <kbd>␣</kbd></button>
+              <button className="btn btn-secondary" onClick={() => { doBack(); focusEditor(); }} disabled={!text.length}><Icon name="backspace" size={18} /> Delete <kbd>⌫</kbd></button>
+              <button className="btn btn-danger" onClick={doClear} disabled={!text.length}><Icon name="trash" size={18} /> Clear <kbd>Del</kbd></button>
             </div>
           </div>
         </section>

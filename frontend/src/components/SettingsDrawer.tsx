@@ -35,9 +35,10 @@ export function SettingsDrawer() {
         </label>
         <Toggle on={s.mirror} onChange={(mirror) => set({ mirror })} label="Mirror video" hint="Like a mirror, so left and right feel natural. Does not change recognition." />
         <Toggle on={s.showSkeleton} onChange={(showSkeleton) => set({ showSkeleton })} label="Show skeleton overlay" hint="The 21 tracked points per hand." />
-        <Toggle on={s.speakEach} onChange={(speakEach) => set({ speakEach })} label="Speech output" hint="Speak each sign as it is added. The Speak button always reads the whole sentence." />
+        <Toggle on={s.speakEach} onChange={(speakEach) => set({ speakEach })} label="Real-time speech" hint="Spells each sign out loud the moment it is recognised. Words are spoken whole." />
+        <Toggle on={s.autoSpace} onChange={(autoSpace) => set({ autoSpace })} label="Space after every letter" hint="Words always get a space after them. Turn this on to also space out single letters." />
 
-        <label className="field"><span><Icon name="type" size={16} /> Language for speech</span>
+        <label className="field"><span><Icon name="type" size={16} /> Language for names and speech</span>
           <select value={s.lang} onChange={(e) => set({ lang: e.target.value as LangCode, voiceURI: "" })}>
             {LANGS.map((l) => <option key={l.code} value={l.code}>{l.label}</option>)}
           </select>
@@ -49,7 +50,8 @@ export function SettingsDrawer() {
           </select>
           {vs.length === 0 && <small className="muted">No {tag} voice is installed on this device; the browser default will be used.</small>}
         </label>
-        <button className="btn btn-secondary" onClick={() => speak(s.lang === "en" ? "Testing the voice" : s.lang === "hi" ? "नमस्ते" : "नमस्कार", s.lang, s.voiceURI)}><Icon name="speaker" size={18} /> Test voice</button>
+        <button className="btn btn-secondary" onClick={() => speak(s.lang === "en" ? "ay bee see" : s.lang === "hi" ? "नमस्ते" : "नमस्कार", s.lang, s.voiceURI)}><Icon name="speaker" size={18} /> Test voice</button>
+        <p className="muted small">Letters are always spelled with English letter names (ay, bee, see) so each letter sounds the same every time.</p>
       </aside>
     </div>
   );
