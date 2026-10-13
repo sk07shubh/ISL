@@ -55,7 +55,6 @@ class Attempt(BaseModel):
 
 class TestIn(BaseModel):
     tester: str = Field(pattern=r"^[A-Za-z0-9_-]{1,16}$", description="Anonymous tester code, e.g. T01")
-    signer_type: Optional[Literal["unseen", "seen"]] = Field(default=None, description="unseen = signer not in the training data; omitted = unknown")
     lighting: Optional[Literal["bright", "dim", "mixed"]] = None
     distance: Optional[Literal["near", "medium", "far"]] = None
     note: Optional[str] = None
@@ -115,8 +114,8 @@ def predict(body: HandsIn):
 @app.post("/api/live-tests", status_code=201, tags=["live tests"])
 def save_test(body: TestIn):
     with D.db() as con:
-        tid = con.execute("INSERT INTO live_tests(tester,created_at,note,signer_type,lighting,distance) VALUES(?,?,?,?,?,?)",
-                          (body.tester, D.now(), body.note, body.signer_type, body.lighting, body.distance)).lastrowid
+        tid = con.execute("INSERT INTO live_tests(tester,created_at,note,lighting,distance) VALUES(?,?,?,?,?)",
+                          (body.tester, D.now(), body.note, body.lighting, body.distance)).lastrowid
         con.executemany(
             "INSERT INTO live_attempts(test_id,target,predicted,confidence,margin,top_label,top_conf,elapsed_ms,hand_size,brightness) "
             "VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -125,12 +124,12 @@ def save_test(body: TestIn):
     return {"id": tid, "attempts": len(body.attempts)}
 
 
-def _attempt_rows(signer_type=None, lighting=None, distance=None):
-    q = ("SELECT a.test_id, t.tester, t.signer_type, t.lighting, t.distance, a.target, a.predicted, a.confidence, a.margin, "
+def _attempt_rows(lighting=None, distance=None):
+    q = ("SELECT a.test_id, t.tester, t.lighting, t.distance, a.target, a.predicted, a.confidence, a.margin, "
          "a.top_label, a.top_conf, a.elapsed_ms, a.hand_size, a.brightness "
          "FROM live_attempts a JOIN live_tests t ON t.id = a.test_id WHERE 1=1")
     args = []
-    for col, val in (("t.signer_type", signer_type), ("t.lighting", lighting), ("t.distance", distance)):
+    for col, val in (("t.lighting", lighting), ("t.distance", distance)):
         if val:
             q += f" AND {col} = ?"
             args.append(val)
@@ -139,13 +138,12 @@ def _attempt_rows(signer_type=None, lighting=None, distance=None):
 
 
 @app.get("/api/analytics", tags=["live tests"])
-def analytics_endpoint(signer_type: Optional[Literal["unseen", "seen"]] = None, lighting: Optional[Literal["bright", "dim", "mixed"]] = None,
-                       distance: Optional[Literal["near", "medium", "far"]] = None):
-    """Live-test metrics, filtered by signer type and conditions. All numbers are computed here, not in the browser."""
+def analytics_endpoint(lighting: Optional[Literal["bright", "dim", "mixed"]] = None, distance: Optional[Literal["near", "medium", "far"]] = None):
+    """Live-test metrics, filtered by lighting and distance. All numbers are computed here, not in the browser."""
     labels = I.alpha().labels
     thr = I.alpha().threshold
-    rows = _attempt_rows(signer_type, lighting, distance)
-    filters = {"signer_type": signer_type, "lighting": lighting, "distance": distance}
+    rows = _attempt_rows(lighting, distance)
+    filters = {"lighting": lighting, "distance": distance}
     return {**A.analytics(rows, thr, labels, filters), "model": I.alpha().name, "parity_ok": I.parity()["ok"]}
 
 
@@ -153,7 +151,7 @@ def analytics_endpoint(signer_type: Optional[Literal["unseen", "seen"]] = None, 
 def live_tests():
     with D.db() as con:
         tests = [dict(r) for r in con.execute(
-            "SELECT t.id,t.tester,t.created_at,t.signer_type,t.lighting,t.distance,COUNT(a.id) attempts, SUM(a.predicted=a.target) correct "
+            "SELECT t.id,t.tester,t.created_at,t.lighting,t.distance,COUNT(a.id) attempts, SUM(a.predicted=a.target) correct "
             "FROM live_tests t LEFT JOIN live_attempts a ON a.test_id=t.id GROUP BY t.id ORDER BY t.id DESC")]
         attempts = [dict(r) for r in con.execute(
             "SELECT t.tester, a.target, a.predicted, a.confidence, a.margin FROM live_attempts a JOIN live_tests t ON t.id=a.test_id "

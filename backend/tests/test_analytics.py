@@ -4,8 +4,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from backend.app import analytics as A
 
 
-def row(target, label, conf, test=1, tester="T01", signer="unseen", lighting="bright", distance="near", ms=800, hs=0.2, br=150):
-    return {"test_id": test, "tester": tester, "signer_type": signer, "lighting": lighting, "distance": distance,
+def row(target, label, conf, test=1, tester="T01", lighting="bright", distance="near", ms=800, hs=0.2, br=150):
+    return {"test_id": test, "tester": tester, "lighting": lighting, "distance": distance,
             "target": target, "predicted": label, "confidence": conf, "margin": None, "top_label": label, "top_conf": conf,
             "elapsed_ms": ms, "hand_size": hs, "brightness": br}
 
@@ -52,7 +52,7 @@ class Metrics(unittest.TestCase):
 
     def test_legacy_rows_fall_back_to_predicted_confidence(self):
         legacy = [{"target": "A", "predicted": "A", "confidence": 0.9, "elapsed_ms": None, "tester": "T", "test_id": 1,
-                   "signer_type": "seen"}]
+                   }]
         self.assertEqual(A.summary(legacy, 0.8)["correct"], 1)
 
     def test_recommendation_needs_enough_attempts(self):
@@ -72,18 +72,13 @@ class Metrics(unittest.TestCase):
         self.assertEqual(cal["n"], 20)
 
     def test_conditions_split(self):
-        rows = [row("A", "A", 0.95, signer="unseen", lighting="dim", hs=0.05, br=40),
-                row("A", "B", 0.95, signer="seen", lighting="bright", hs=0.25, br=200)]
+        rows = [row("A", "A", 0.95, lighting="dim", hs=0.05, br=40),
+                row("A", "B", 0.95, lighting="bright", hs=0.25, br=200)]
         out = A.analytics(rows, 0.8, ["A", "B"], {})
         self.assertIn("dim", out["by_condition"]["lighting"])
         self.assertIn("far (<0.10)", out["by_condition"]["hand_size"])
         self.assertIn("dark (<70)", out["by_condition"]["brightness"])
-        self.assertEqual(out["unseen_signer"]["attempts"], 1)
-        self.assertEqual(out["unseen_signer"]["correct"], 1)
-
-    def test_no_unseen_rows_gives_no_headline(self):
-        out = A.analytics([row("A", "A", 0.95, signer="seen")], 0.8, ["A"], {})
-        self.assertIsNone(out["unseen_signer"])
+        self.assertNotIn("unseen_signer", out)
 
 
 if __name__ == "__main__":

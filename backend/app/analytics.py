@@ -1,7 +1,7 @@
 """Live-test analytics. Pure functions over attempt rows, so they can be unit-tested without a server.
 
 Each row is a dict: target, predicted, confidence, margin, top_label, top_conf, elapsed_ms, hand_size, brightness,
-tester, signer_type, lighting, distance. Rows written before the top_* fields existed fall back to predicted/confidence.
+tester, lighting, distance. Rows written before the top_* fields existed fall back to predicted/confidence.
 
 Definitions (see README "Test metrics"):
   shown      = the app displayed a sign (top prediction confidence >= threshold)
@@ -148,7 +148,6 @@ def by_group(rows: List[dict], thr: float, key) -> Dict[str, dict]:
 
 
 def analytics(rows: List[dict], thr: float, labels: List[str], filters: dict) -> dict:
-    unseen = [r for r in rows if r.get("signer_type") == "unseen"]        # only an explicit "unseen" counts
     curve = risk_coverage(rows)
     return {
         "filters": filters,
@@ -156,19 +155,13 @@ def analytics(rows: List[dict], thr: float, labels: List[str], filters: dict) ->
         "tests": len({r["test_id"] for r in rows}),
         "testers": len({r["tester"] for r in rows}),
         "overall": summary(rows, thr),
-        "unseen_signer": summary(unseen, thr) if unseen else None,
-        "unseen_testers": len({r["tester"] for r in unseen}),
         "risk_coverage": curve,
         "recommended_threshold": recommend_threshold(curve, len(rows)),
         "wrong_shown_target": WRONG_SHOWN_TARGET,
         "calibration": calibration(rows),
         "per_sign": per_sign(rows, thr, labels),
         "confusion": confusion(rows, thr, labels),
-        "per_signer": {t: {"signer_type": next(r["signer_type"] for r in rows if r["tester"] == t),
-                           **summary([r for r in rows if r["tester"] == t], thr)}
-                       for t in sorted({r["tester"] for r in rows})},
         "by_condition": {
-            "signer_type": by_group(rows, thr, lambda r: r.get("signer_type")),
             "lighting": by_group(rows, thr, lambda r: r.get("lighting")),
             "distance": by_group(rows, thr, lambda r: r.get("distance")),
             "hand_size": by_group(rows, thr, lambda r: hand_size_bin(r.get("hand_size"))),

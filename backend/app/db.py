@@ -33,7 +33,7 @@ def db():
         con.close()
 
 # columns added after the first release; existing databases are upgraded in place
-NEW_TEST_COLS = {"signer_type": "TEXT", "lighting": "TEXT", "distance": "TEXT"}   # NULL = not recorded (never counted as unseen)
+NEW_TEST_COLS = {"signer_type": "TEXT", "lighting": "TEXT", "distance": "TEXT"}   # signer_type is unused (kept so old databases still open)
 NEW_ATTEMPT_COLS = {"top_label": "TEXT", "top_conf": "REAL", "elapsed_ms": "INTEGER", "hand_size": "REAL", "brightness": "REAL"}
 
 

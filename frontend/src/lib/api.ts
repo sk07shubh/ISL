@@ -26,30 +26,29 @@ export interface Attempt {
   target: string; predicted: string | null; confidence: number | null; margin: number | null;
   top_label?: string | null; top_conf?: number | null; elapsed_ms?: number | null; hand_size?: number | null; brightness?: number | null;
 }
-export interface TestMeta { tester: string; signer_type?: "unseen" | "seen" | null; lighting?: "bright" | "dim" | "mixed" | null; distance?: "near" | "medium" | "far" | null }
+export interface TestMeta { tester: string; lighting?: "bright" | "dim" | "mixed" | null; distance?: "near" | "medium" | "far" | null; note?: string | null }
 
 export interface Summary {
   attempts: number; shown: number; correct: number; wrong_shown: number; uncertain: number;
   accuracy_all: number | null; coverage: number | null; precision_shown: number | null; wrong_shown_rate: number | null; median_time_ms: number | null;
 }
 export interface Analytics {
-  filters: { signer_type: string | null; lighting: string | null; distance: string | null };
-  threshold: number; tests: number; testers: number; overall: Summary; unseen_signer: Summary | null; unseen_testers: number;
+  filters: { lighting: string | null; distance: string | null };
+  threshold: number; tests: number; testers: number; overall: Summary;
   risk_coverage: { threshold: number; coverage: number | null; precision_shown: number | null; wrong_shown_rate: number | null; accuracy_all: number | null }[];
   recommended_threshold: number | null; wrong_shown_target: number;
   calibration: { bins: { lo: number; hi: number; n: number; mean_confidence: number | null; accuracy: number | null }[]; ece: number | null; n: number };
   per_sign: { key: string; support: number; predicted: number; tp: number; precision: number | null; recall: number | null; f1: number | null; uncertain: number; median_time_ms: number | null }[];
   confusion: { labels: string[]; matrix: number[][]; uncertain: number[] };
-  per_signer: Record<string, Summary & { signer_type: string | null }>;
   by_condition: Record<string, Record<string, Summary>>;
   model: string; parity_ok: boolean;
 }
-export async function getAnalytics(f: { signer_type?: string; lighting?: string; distance?: string }): Promise<Analytics> {
+export async function getAnalytics(f: { lighting?: string; distance?: string }): Promise<Analytics> {
   const q = new URLSearchParams(Object.entries(f).filter(([, v]) => v) as [string, string][]).toString();
   return getJson<Analytics>("/api/analytics" + (q ? "?" + q : ""), "/api/analytics");
 }
 export interface LiveData {
-  tests: { id: number; tester: string; created_at: string; attempts: number; correct: number; signer_type: string | null; lighting: string | null; distance: string | null }[];
+  tests: { id: number; tester: string; created_at: string; attempts: number; correct: number; lighting: string | null; distance: string | null }[];
   attempts: (Attempt & { tester: string })[];
 }
 export const liveTests = () => getJson<LiveData>("/api/live-tests", "/api/live-tests");

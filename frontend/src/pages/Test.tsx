@@ -8,22 +8,19 @@ import type { GateOutput, Vocabulary } from "../lib/types";
 
 const TIMEOUT_MS = 8000;
 type Phase = "setup" | "run" | "done";
-type Opt<T extends string> = { value: T; label: string };
-const SIGNER: Opt<"unseen" | "seen">[] = [{ value: "unseen", label: "Unseen signer" }, { value: "seen", label: "Seen in training" }];
-const LIGHT: Opt<"bright" | "dim" | "mixed">[] = [{ value: "bright", label: "Bright" }, { value: "dim", label: "Dim" }, { value: "mixed", label: "Mixed" }];
-const DIST: Opt<"near" | "medium" | "far">[] = [{ value: "near", label: "Near" }, { value: "medium", label: "Medium" }, { value: "far", label: "Far" }];
+type Light = "bright" | "dim" | "mixed";
+type Dist = "near" | "medium" | "far";
 
-/** A guided test. Show each letter when asked; the app records what it read (or that it stayed Uncertain),
- *  how long it took, and the conditions: lighting, distance, hand size, measured brightness. */
+/** A simple test anyone can run: show each letter when asked. The app records what it read (or that it stayed
+ *  Uncertain), how long it took, and the conditions if the tester noted them. */
 export function Test() {
   const [vocab, setVocab] = useState<Vocabulary | null>(null);
   const [stage, setStage] = useState<StageState | null>(null);
   const [view, setView] = useState<FrameInfo | null>(null);
   const viewRef = useRef<FrameInfo | null>(null);
-  const [tester, setTester] = useState(() => localStorage.getItem("isl.tester") || "");
-  const [signer, setSigner] = useState<"unseen" | "seen" | null>("unseen");
-  const [light, setLight] = useState<"bright" | "dim" | "mixed" | null>(null);
-  const [dist, setDist] = useState<"near" | "medium" | "far" | null>(null);
+  const [name, setName] = useState(() => localStorage.getItem("isl.tester") || "");
+  const [light, setLight] = useState<Light | null>(null);
+  const [dist, setDist] = useState<Dist | null>(null);
   const [phase, setPhase] = useState<Phase>("setup");
   const [queue, setQueue] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
@@ -39,7 +36,7 @@ export function Test() {
   const pool = vocab?.signs.filter((v) => v.active) ?? [];
   const target = phase === "run" ? queue[idx] : null;
   const ready = stage?.phase === "ready";
-  const setupOk = !!signer && !!light && !!dist && ready && pool.length > 0;
+  const nameOk = !name.trim() || /^[A-Za-z0-9_-]{1,16}$/.test(name.trim());
 
   const onView = useCallback((f: FrameInfo | null) => { viewRef.current = f; setView(f); }, []);
 
@@ -55,7 +52,7 @@ export function Test() {
     }, 1100);
   }, [byKey]);
 
-  /** Everything the app knew at the moment it decided, so the analytics can split results by condition. */
+  /** What the app knew at the moment it decided. */
   const measure = (g: GateOutput | null, predicted: string | null, target: string): Attempt => {
     const f = viewRef.current;
     const top = g?.top?.[0];
@@ -89,9 +86,9 @@ export function Test() {
   }, [phase]);
 
   const start = () => {
-    const t = tester.trim(); if (t && !/^[A-Za-z0-9_-]{1,16}$/.test(t)) return;
+    const t = name.trim();
     localStorage.setItem("isl.tester", t);
-    meta.current = { tester: t || "anon", signer_type: signer, lighting: light, distance: dist };
+    meta.current = { tester: t || "anon", lighting: light, distance: dist };
     const keys = pool.map((p) => p.key).sort(() => Math.random() - 0.5);
     setQueue(keys); setIdx(0); setAttempts([]); setSaved("idle"); lock.current = false; setPhase("run");
   };
@@ -105,7 +102,7 @@ export function Test() {
   return (
     <div className="page test">
       <header className="page-head"><div><h1>Live test</h1>
-        <p className="muted">Show each letter when asked. The app records what it reads, or that it stayed Uncertain, and how long it took. Results appear on the Model &amp; results page.</p></div>
+        <p className="muted">Show each letter when the app asks for it. It records what the interpreter reads, or that it stayed unsure, and how long it took.</p></div>
         {phase === "run" && <Chip kind="load" pulse>Letter {idx + 1} of {queue.length}</Chip>}</header>
 
       <div className="test-grid">
@@ -113,14 +110,14 @@ export function Test() {
         <div className="card test-panel">
           {phase === "setup" && (<>
             <h2>Start a test</h2>
-            <label className="field"><span>Tester code (anonymous)</span>
-              <input className="mono" value={tester} onChange={(e) => setTester(e.target.value)} placeholder="T01, or leave blank" maxLength={16} aria-label="Tester code" /></label>
-            <ChoiceRow label="Who is signing?" value={signer} options={SIGNER} onChange={setSigner} hint="Unseen = a person whose hands were not in the training data. This is the test the PS asks for." />
-            <ChoiceRow label="Lighting" value={light} options={LIGHT} onChange={setLight} />
-            <ChoiceRow label="Distance from camera" value={dist} options={DIST} onChange={setDist} />
-            <p className="muted small">Record the conditions honestly: they are what the Results page breaks accuracy down by.</p>
-            <button className="btn btn-primary btn-lg" onClick={start} disabled={!setupOk}>
-              <Icon name="target" size={20} /> {!ready ? "Waiting for camera and model…" : !setupOk ? "Choose signer, lighting and distance" : `Start (${pool.length} letters)`}</button>
+            <p className="muted">Anyone can run this. Show the letters clearly, one at a time. Every letter is asked once, in random order.</p>
+            <label className="field"><span>Your name or code (optional)</span>
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Asha, or leave blank" maxLength={16} aria-label="Your name or code" />
+              {!nameOk && <small className="warn-text">Use letters, digits, - or _ only.</small>}</label>
+            <ChoiceRow label="Lighting (optional)" value={light} options={[["bright", "Bright"], ["dim", "Dim"], ["mixed", "Mixed"]]} onChange={setLight} />
+            <ChoiceRow label="Distance from camera (optional)" value={dist} options={[["near", "Near"], ["medium", "Medium"], ["far", "Far"]]} onChange={setDist} />
+            <button className="btn btn-primary btn-lg" onClick={start} disabled={!ready || !nameOk || !pool.length}>
+              <Icon name="target" size={20} /> {ready ? `Start (${pool.length} letters)` : "Waiting for camera and model…"}</button>
           </>)}
 
           {phase === "run" && v && (<>
@@ -133,7 +130,7 @@ export function Test() {
             <div className="btn-row">
               <button className="btn btn-secondary" onClick={() => target && advance(measure(viewRef.current?.gate ?? null, null, target))}>Skip</button>
               <button className="btn btn-danger-ghost" onClick={() => setPhase("setup")}>Stop</button></div>
-            <p className="small muted">{correct} correct · {wrong} wrong · {unc} uncertain so far</p>
+            <p className="small muted">{correct} correct · {wrong} wrong · {unc} unsure so far</p>
           </>)}
 
           {phase === "done" && (<>
@@ -141,8 +138,8 @@ export function Test() {
             <div className="mini-stats">
               <div><b className="mono">{pct(attempts.length ? correct / attempts.length : 0, 0)}</b><span>correct</span></div>
               <div><b className="mono">{wrong}</b><span>wrong answers shown</span></div>
-              <div><b className="mono">{unc}</b><span>stayed uncertain</span></div></div>
-            <p className="small muted">{saved === "saving" ? "Saving…" : saved === "ok" ? "Saved. See Model & results for the analysis." : saved === "err" ? "Could not save: is the backend running?" : ""}</p>
+              <div><b className="mono">{unc}</b><span>stayed unsure</span></div></div>
+            <p className="small muted">{saved === "saving" ? "Saving…" : saved === "ok" ? "Saved. See Model & results for the full picture." : saved === "err" ? "Could not save: is the backend running?" : ""}</p>
             <div className="btn-row"><button className="btn btn-primary" onClick={() => setPhase("setup")}>Run another test</button>
               <a className="btn btn-secondary" href="/results" onClick={(e) => { e.preventDefault(); history.pushState({}, "", "/results"); window.dispatchEvent(new PopStateEvent("popstate")); }}>See results</a></div>
           </>)}
@@ -152,13 +149,13 @@ export function Test() {
   );
 }
 
-function ChoiceRow<T extends string>({ label, value, options, onChange, hint }: { label: string; value: T | null; options: Opt<T>[]; onChange: (v: T) => void; hint?: string }) {
+function ChoiceRow<T extends string>({ label, value, options, onChange }: { label: string; value: T | null; options: [T, string][]; onChange: (v: T | null) => void }) {
   return (
     <div className="field"><span>{label}</span>
       <div className="segmented" role="radiogroup" aria-label={label}>
-        {options.map((o) => <button key={o.value} role="radio" aria-checked={value === o.value} className={value === o.value ? "on" : ""} onClick={() => onChange(o.value)}>{o.label}</button>)}
+        <button role="radio" aria-checked={value === null} className={value === null ? "on" : ""} onClick={() => onChange(null)}>Not noted</button>
+        {options.map(([v, text]) => <button key={v} role="radio" aria-checked={value === v} className={value === v ? "on" : ""} onClick={() => onChange(v)}>{text}</button>)}
       </div>
-      {hint && <small className="muted">{hint}</small>}
     </div>
   );
 }
