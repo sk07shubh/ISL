@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from . import analytics as A
 from . import db as D
 from . import inference as I
 
@@ -45,10 +46,18 @@ class Attempt(BaseModel):
     predicted: Optional[str] = Field(default=None, description="Committed sign, or null if the app stayed Uncertain until timeout")
     confidence: Optional[float] = None
     margin: Optional[float] = None
+    top_label: Optional[str] = Field(default=None, description="Best label at the moment of decision, shown or not")
+    top_conf: Optional[float] = None
+    elapsed_ms: Optional[int] = Field(default=None, ge=0, le=600000, description="Time from prompt to decision")
+    hand_size: Optional[float] = Field(default=None, ge=0, le=2, description="Wrist to middle knuckle, image-width units")
+    brightness: Optional[float] = Field(default=None, ge=0, le=255, description="Mean video luma, 0-255")
 
 
 class TestIn(BaseModel):
     tester: str = Field(pattern=r"^[A-Za-z0-9_-]{1,16}$", description="Anonymous tester code, e.g. T01")
+    signer_type: Optional[Literal["unseen", "seen"]] = Field(default=None, description="unseen = signer not in the training data; omitted = unknown")
+    lighting: Optional[Literal["bright", "dim", "mixed"]] = None
+    distance: Optional[Literal["near", "medium", "far"]] = None
     note: Optional[str] = None
     attempts: List[Attempt] = Field(min_length=1, max_length=500)
 
@@ -106,17 +115,45 @@ def predict(body: HandsIn):
 @app.post("/api/live-tests", status_code=201, tags=["live tests"])
 def save_test(body: TestIn):
     with D.db() as con:
-        tid = con.execute("INSERT INTO live_tests(tester,created_at,note) VALUES(?,?,?)", (body.tester, D.now(), body.note)).lastrowid
-        con.executemany("INSERT INTO live_attempts(test_id,target,predicted,confidence,margin) VALUES(?,?,?,?,?)",
-                        [(tid, a.target, a.predicted, a.confidence, a.margin) for a in body.attempts])
+        tid = con.execute("INSERT INTO live_tests(tester,created_at,note,signer_type,lighting,distance) VALUES(?,?,?,?,?,?)",
+                          (body.tester, D.now(), body.note, body.signer_type, body.lighting, body.distance)).lastrowid
+        con.executemany(
+            "INSERT INTO live_attempts(test_id,target,predicted,confidence,margin,top_label,top_conf,elapsed_ms,hand_size,brightness) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            [(tid, a.target, a.predicted, a.confidence, a.margin, a.top_label, a.top_conf, a.elapsed_ms, a.hand_size, a.brightness)
+             for a in body.attempts])
     return {"id": tid, "attempts": len(body.attempts)}
+
+
+def _attempt_rows(signer_type=None, lighting=None, distance=None):
+    q = ("SELECT a.test_id, t.tester, t.signer_type, t.lighting, t.distance, a.target, a.predicted, a.confidence, a.margin, "
+         "a.top_label, a.top_conf, a.elapsed_ms, a.hand_size, a.brightness "
+         "FROM live_attempts a JOIN live_tests t ON t.id = a.test_id WHERE 1=1")
+    args = []
+    for col, val in (("t.signer_type", signer_type), ("t.lighting", lighting), ("t.distance", distance)):
+        if val:
+            q += f" AND {col} = ?"
+            args.append(val)
+    with D.db() as con:
+        return [dict(r) for r in con.execute(q + " ORDER BY a.id", args)]
+
+
+@app.get("/api/analytics", tags=["live tests"])
+def analytics_endpoint(signer_type: Optional[Literal["unseen", "seen"]] = None, lighting: Optional[Literal["bright", "dim", "mixed"]] = None,
+                       distance: Optional[Literal["near", "medium", "far"]] = None):
+    """Live-test metrics, filtered by signer type and conditions. All numbers are computed here, not in the browser."""
+    labels = I.alpha().labels
+    thr = I.alpha().threshold
+    rows = _attempt_rows(signer_type, lighting, distance)
+    filters = {"signer_type": signer_type, "lighting": lighting, "distance": distance}
+    return {**A.analytics(rows, thr, labels, filters), "model": I.alpha().name, "parity_ok": I.parity()["ok"]}
 
 
 @app.get("/api/live-tests", tags=["live tests"])
 def live_tests():
     with D.db() as con:
         tests = [dict(r) for r in con.execute(
-            "SELECT t.id,t.tester,t.created_at,COUNT(a.id) attempts, SUM(a.predicted=a.target) correct "
+            "SELECT t.id,t.tester,t.created_at,t.signer_type,t.lighting,t.distance,COUNT(a.id) attempts, SUM(a.predicted=a.target) correct "
             "FROM live_tests t LEFT JOIN live_attempts a ON a.test_id=t.id GROUP BY t.id ORDER BY t.id DESC")]
         attempts = [dict(r) for r in con.execute(
             "SELECT t.tester, a.target, a.predicted, a.confidence, a.margin FROM live_attempts a JOIN live_tests t ON t.id=a.test_id "

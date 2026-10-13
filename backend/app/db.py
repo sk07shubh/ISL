@@ -32,6 +32,20 @@ def db():
     finally:
         con.close()
 
+# columns added after the first release; existing databases are upgraded in place
+NEW_TEST_COLS = {"signer_type": "TEXT", "lighting": "TEXT", "distance": "TEXT"}   # NULL = not recorded (never counted as unseen)
+NEW_ATTEMPT_COLS = {"top_label": "TEXT", "top_conf": "REAL", "elapsed_ms": "INTEGER", "hand_size": "REAL", "brightness": "REAL"}
+
+
+def _migrate(con):
+    for table, cols in (("live_tests", NEW_TEST_COLS), ("live_attempts", NEW_ATTEMPT_COLS)):
+        have = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+        for name, decl in cols.items():
+            if name not in have:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def init_db():
     with db() as con:
         con.executescript(SCHEMA)
+        _migrate(con)

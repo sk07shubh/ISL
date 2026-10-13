@@ -45,3 +45,15 @@ When the classifier is retrained, export the new `model.json`, `labels.json`, `c
 ## Limitations
 - Static letters only. Continuous signing and full sentences are not recognised.
 - The test metrics included in the training repo are not repeated here. Accuracy shown in the app is what the Live test measures.
+
+## Test metrics
+Live tests (**Live test** page) record, for every letter asked: what the app showed, its confidence, how long it took, the hand size, and the brightness. The **Model & results** page computes everything on the backend (`backend/app/analytics.py`, unit-tested with `python3 -m unittest backend/tests/test_analytics.py`).
+
+- **Unseen-signer accuracy**: accuracy on tests where the signer was marked as not in the training data (the PS measure). Tests with signer type "not recorded" never count as unseen.
+- **Wrong signs shown**: attempts where the app displayed a wrong sign. The PS asks us to avoid confident wrong answers, so the target is 2% or less.
+- **Coverage**: attempts where a sign was shown. The rest stayed Uncertain.
+- **Precision when shown**: of the shown signs, the share that were correct.
+- **Per-sign precision, recall, F1**: precision uses shown predictions; recall uses all attempts for that letter, so abstentions count as misses.
+- **Risk-coverage**: how coverage, precision, and wrong-shown rate change with the confidence threshold. The recommended threshold is the one with the most coverage that keeps wrong-shown under the target (needs at least 20 attempts).
+- **Calibration (ECE)**: within each confidence band, the gap between stated confidence and how often the top prediction was right.
+- **Conditions**: accuracy broken down by signer, lighting, distance (recorded by the tester), hand size, and measured brightness. The hand-size and brightness bands are provisional and should be tuned on real data.

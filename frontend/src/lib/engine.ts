@@ -6,6 +6,8 @@ import type { GateOutput, Landmark, TrackHand } from "./types";
 export interface FrameInfo {
   t: number; hands: TrackHand[]; probs: number[] | null; gate: GateOutput | null; fps: number; buffered: number;
   ms: { track: number; server: number; total: number };
+  brightness: number;            // mean video luma 0-255, sampled every 10 frames
+  handSize: number | null;       // wrist to middle knuckle, image-width units (for the test's distance analysis)
 }
 export const CONNECTIONS: [number, number][] = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
 
@@ -32,6 +34,8 @@ export class Engine {
     const { video, tracker, gate } = this.o;
     if (!video || video.readyState < 2 || video.currentTime === this.lastVT) return;
     this.lastVT = video.currentTime;
+    this.frameNo++;
+    if (this.frameNo % 10 === 1) this.bright = this.sampleBrightness(video);
     const now = performance.now();
     const ts = Math.max(now, this.lastTs + 1); this.lastTs = ts;
     let hands: TrackHand[] = [];
@@ -59,10 +63,24 @@ export class Engine {
     this.fpsN++;
     if (now - this.fpsT >= 1000) { this.fps = (this.fpsN * 1000) / (now - this.fpsT); this.fpsN = 0; this.fpsT = now; }
     this.draw(hands, g);
+    const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+    const handSize = hands[0] ? Math.hypot(hands[0].landmarks[9][0] - hands[0].landmarks[0][0], (hands[0].landmarks[9][1] - hands[0].landmarks[0][1]) * vh / vw) : null;
     this.o.onFrame?.({ t: now, hands, probs: probs ? Array.from(probs) : null, gate: g, fps: this.fps, buffered: this.hist.length,
-      ms: { track: tTrack, server: this.serverMs, total: performance.now() - now } });
+      ms: { track: tTrack, server: this.serverMs, total: performance.now() - now }, brightness: this.bright, handSize });
   };
   private serverMs = 0;
+  private frameNo = 0; private bright = 0; private bcv: HTMLCanvasElement | null = null;
+
+  private sampleBrightness(v: HTMLVideoElement): number {
+    if (!this.bcv) { this.bcv = document.createElement("canvas"); this.bcv.width = 32; this.bcv.height = 24; }
+    const ctx = this.bcv.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return this.bright;
+    ctx.drawImage(v, 0, 0, 32, 24);
+    const d = ctx.getImageData(0, 0, 32, 24).data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    return sum / (d.length / 4);
+  }
 
   private draw(hands: TrackHand[], g: GateOutput) {
     const c = this.o.canvas; if (!c) return;
