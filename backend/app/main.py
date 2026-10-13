@@ -107,7 +107,15 @@ def vocabulary():
 
 @app.post("/api/predict", tags=["live"])
 def predict(body: HandsIn):
-    """One frame of hand points -> probabilities from all three classifiers (as live_clean.py computes them)."""
+    """One frame of hand points -> per-head probabilities + the arbitrated winner (as live_clean.py combined mode).
+
+    The winner field mirrors the combined-mode decision tree in live_clean.py exactly:
+      - hand-count structural filtering (1-handed vs 2-handed signs)
+      - B vs break priority rule
+      - please/how are you overlap override
+      - phrase precedence with mistake/digit exception
+    Smoothing and stability tracking are done by the frontend using the raw heads probs.
+    """
     for h in body.hands:
         if len(h) != 21 or any(len(p) != 3 for p in h):
             raise HTTPException(422, "each hand must have 21 points of [x, y, z]")
@@ -116,8 +124,36 @@ def predict(body: HandsIn):
     for name, head in I.heads().items():
         probs = head.classify(hands, body.aspect) if hands else None
         out[name] = None if probs is None else {"probs": [round(float(p), 6) for p in probs], "labels": head.labels}
+
+    # Build candidates that pass each head's effective threshold (phrase uses 0.9x as in live_clean.py)
+    candidates = []
+    for name, head in I.heads().items():
+        res = out[name]
+        if res is None:
+            continue
+        probs_list = res["probs"]
+        labels = res["labels"]
+        best_j = int(np.argmax(probs_list))
+        confidence = probs_list[best_j]
+        if confidence >= head.effective_threshold:
+            candidates.append({
+                "name": name,
+                "prediction": labels[best_j],
+                "confidence": confidence,
+            })
+
+    num_hands = len(body.hands)
+    winner_cand = I.arbitrate(candidates, num_hands)
+    winner = None
+    if winner_cand is not None:
+        winner = {
+            "label": winner_cand["prediction"],
+            "confidence": round(winner_cand["confidence"], 6),
+            "source": winner_cand["name"],
+        }
+
     reason = None if any(v for v in out.values()) else "no_usable_hand"
-    return {"heads": out, "reason": reason}
+    return {"heads": out, "winner": winner, "reason": reason}
 
 
 @app.post("/api/live-tests", status_code=201, tags=["live tests"])

@@ -1,5 +1,5 @@
 import type { Gate } from "./gate";
-import { predictFrame, type Mode } from "./api";
+import { predictFrame, type PredictResult, type Mode } from "./api";
 import type { Tracker } from "./tracker";
 import type { GateOutput, Landmark, TrackHand } from "./types";
 
@@ -76,6 +76,17 @@ export class Engine {
   stop() { this.running = false; cancelAnimationFrame(this.raf); const c = this.o.canvas; c?.getContext("2d")?.clearRect(0, 0, c.width, c.height); }
 
   private combined(): Float64Array | null {
+    // If the backend produced an arbitrated winner this frame, build a synthetic prob vector
+    // from it so the gate sees the same decision the local live_clean.py would make.
+    if (this.lastWinner !== null) {
+      const { label } = this.lastWinner;
+      const idx = this.o.labels.indexOf(label);
+      if (idx >= 0) {
+        const out = new Float64Array(this.o.labels.length);
+        out[idx] = this.lastWinner.confidence;
+        return out;
+      }
+    }
     return combine(this.o.labels, this.o.heads, this.slots, this.hist, this.active, this.o.smooth);
   }
 
@@ -93,7 +104,7 @@ export class Engine {
     try { hands = tracker.detect(video, ts).hands; } catch { hands = []; }
     const tTrack = performance.now() - now;
 
-    if (!hands.length) for (const h of Object.keys(this.hist)) this.hist[h] = [];
+    if (!hands.length) { for (const h of Object.keys(this.hist)) this.hist[h] = []; this.lastWinner = null; }
     else if (!this.inflight) {
       this.inflight = true;
       const aspect = (video.videoWidth || 640) / (video.videoHeight || 480);   // camera frame width / height
@@ -101,11 +112,14 @@ export class Engine {
       predictFrame(hands.map((h) => h.landmarks as Landmark[]), aspect)
         .then((r) => {
           this.serverMs = performance.now() - t0;
+          // Push raw probs for each head (used for display/debug)
           for (const h of Object.keys(this.hist)) {
             const res = r.heads[h];
             if (res?.probs) { this.hist[h].push(Float64Array.from(res.probs)); if (this.hist[h].length > this.o.smooth) this.hist[h].shift(); }
             else this.hist[h] = [];
           }
+          // Use the backend-arbitrated winner (mirrors live_clean.py combined-mode logic exactly)
+          this.lastWinner = r.winner ?? null;
         })
         .catch(() => { for (const h of Object.keys(this.hist)) this.hist[h] = []; })
         .finally(() => { this.inflight = false; });
@@ -124,6 +138,7 @@ export class Engine {
       ms: { track: tTrack, server: this.serverMs, total: performance.now() - now }, brightness: this.bright, handSize });
   };
   private serverMs = 0;
+  private lastWinner: { label: string; confidence: number; source: string } | null = null;
   private frameNo = 0; private bright = 0; private bcv: HTMLCanvasElement | null = null;
 
   private sampleBrightness(v: HTMLVideoElement): number {
