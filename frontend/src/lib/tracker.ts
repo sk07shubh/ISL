@@ -20,7 +20,7 @@ export function getTracker(): Promise<Tracker> {
       try {
         const lm = await HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: TASK, delegate }, runningMode: "VIDEO", numHands: 2,
-          minHandDetectionConfidence: 0.5, minHandPresenceConfidence: 0.5, minTrackingConfidence: 0.5,
+          minHandDetectionConfidence: 0.35, minHandPresenceConfidence: 0.35, minTrackingConfidence: 0.35,
         });
         return {
           delegate,
