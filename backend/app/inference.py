@@ -1,30 +1,41 @@
-"""Runs the trained ISL classifier for the web app.
+"""Runs the three trained ISL classifiers (alphabet, digits, phrases) for the web app.
 
-Same pipeline as training/live_clean.py:
+Same pipeline as training/live_clean.py for each model:
   * preprocessing: backend/app/features.py, a byte-identical copy of training/features.py
-  * model: model_aug/model.json, exported from isl_clean_mlp.joblib. Its forward pass is
-    replicated here in NumPy (no scikit-learn needed). parity_check() proves the two agree.
+  * models: model.json exported from each joblib model (model_aug, model_digits_v3, model_phrases).
+    The forward pass is replicated here in NumPy, so scikit-learn is not needed at runtime.
+  * aspect: the alphabet model uses the camera frame's width/height; digits and phrases use the
+    aspect stored in their config (1.0 and 1.3333), exactly as live_clean.py does.
+parity_check() recomputes each teammate fixture and must match before the app starts answering.
 """
 import json
-from typing import Optional
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
 from . import features as F
 
 ROOT = Path(__file__).resolve().parents[2]
-ALPHA_DIR = ROOT / "model_aug"
-DIGIT_DIR = ROOT / "model_digits"          # optional: teammate has not pushed this folder yet
 TASK_FILE = ROOT / "model" / "hand_landmarker.task"
-PARITY_FILE = ALPHA_DIR / "parity_test.json"
-SMOOTH = 8                                  # same as: live_clean.py --smooth 8
+SMOOTH = 8        # frames averaged per model (live_clean.py --smooth 8)
+STABLE = 5        # consecutive frames the same top sign must hold before it is shown (live_clean.py STABLE_FRAMES)
+
+# name -> (folder, parity fixture, sign kind)
+HEAD_SPECS = {
+    "alphabet": (ROOT / "model_aug", "parity_test.json", "letter"),
+    "digit": (ROOT / "model_digits_v3", "prediction_test.json", "digit"),
+    "phrase": (ROOT / "model_phrases", "parity_test.json", "word"),
+}
+PARITY_FEATURE_TOL = 1e-4
+PARITY_PROB_TOL = 1e-4
 
 
 class Head:
     """One exported classifier: config + labels + MLP layers."""
 
-    def __init__(self, folder: Path):
+    def __init__(self, name: str, folder: Path, kind: str):
+        self.name, self.folder, self.kind = name, folder, kind
         cfg = json.loads((folder / "config.json").read_text("utf-8"))
         labels = [str(x) for x in json.loads((folder / "labels.json").read_text("utf-8"))]
         if cfg.get("features") != 161 or cfg.get("two_hand") is not True or cfg.get("rotate") is not False or cfg.get("extras") is not True:
@@ -33,11 +44,15 @@ class Head:
         self.layers = [(np.asarray(L["W"], np.float64), np.asarray(L["b"], np.float64), L["activation"]) for L in layers]
         if self.layers[-1][0].shape[1] != len(labels):
             raise ValueError(f"{folder.name}: {len(labels)} labels but the model outputs {self.layers[-1][0].shape[1]}")
-        self.cfg, self.labels, self.name = cfg, labels, folder.name
+        self.cfg, self.labels = cfg, labels
 
     @property
     def threshold(self) -> float:
         return float(self.cfg.get("threshold", 0.8))
+
+    def aspect_for(self, frame_aspect: float) -> float:
+        """Alphabet: the camera frame's aspect. Digits/phrases: the aspect in their config (as live_clean.py)."""
+        return float(frame_aspect) if self.name == "alphabet" else float(self.cfg.get("aspect", frame_aspect))
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         a = np.asarray(x, np.float64)
@@ -50,53 +65,49 @@ class Head:
                 a = a / a.sum()
         return a
 
-    def classify(self, hands, aspect: float):
-        """hands: list of (21,3) arrays from MediaPipe. Returns probs or None if no usable hand."""
-        arrs = [np.asarray(h, np.float32) for h in hands]
-        if not arrs:
-            return None
-        arrs = F.sort_hands(arrs)
-        x = F.build_features(arrs, two_hand=True, rotate=False, aspect=aspect, extras=True)
+    def classify(self, hands_sorted, frame_aspect: float) -> Optional[np.ndarray]:
+        x = F.build_features(hands_sorted, two_hand=True, rotate=False, aspect=self.aspect_for(frame_aspect), extras=True)
         return None if x is None else self.forward(x)
 
 
-_alpha: Optional[Head] = None
-_digit: Optional[Head] = None
-_parity: dict = {"ok": False, "detail": "not run"}
+_heads: dict = {}
+_parity: dict = {"ok": False, "heads": {}}
 
 
 def load() -> None:
-    global _alpha, _digit, _parity
-    _alpha = Head(ALPHA_DIR)
-    _digit = Head(DIGIT_DIR) if (DIGIT_DIR / "model.json").exists() else None
+    global _heads, _parity
+    _heads = {name: Head(name, folder, kind) for name, (folder, _, kind) in HEAD_SPECS.items()}
     _parity = parity_check()
 
 
-def alpha() -> Head:
-    if _alpha is None:
+def heads() -> dict:
+    if not _heads:
         load()
-    return _alpha
+    return _heads
 
 
-def digit() -> Optional[Head]:
-    if _alpha is None:
-        load()
-    return _digit
+def all_labels() -> list:
+    """Every sign in one list, in a fixed order: letters, digits, phrases."""
+    out = []
+    for name in ("alphabet", "digit", "phrase"):
+        out += [(name, k) for k in heads()[name].labels]
+    return out
 
 
 def parity_check() -> dict:
-    """Recomputes the teammate's saved fixture. Passes only if features and probabilities match."""
-    p = json.loads(PARITY_FILE.read_text("utf-8"))
-    head = Head(ALPHA_DIR)
-    hands = [np.asarray(h, np.float32) for h in p["raw_hands"]]
-    arrs = F.sort_hands(hands)
-    x = F.build_features(arrs, two_hand=True, rotate=False, aspect=float(p["aspect"]), extras=True)
-    fd = float(np.abs(x - np.asarray(p["expected_features"], np.float32)).max())
-    pd = float(np.abs(head.forward(x) - np.asarray(p["expected_probabilities"])).max())
-    ok = fd < 1e-4 and pd < 1e-6
-    return {"ok": ok, "max_feature_diff": fd, "max_prob_diff": pd, "fixture": "model_aug/parity_test.json"}
+    """Recomputes each teammate fixture with the same code path the server uses. A head must match or the app refuses it."""
+    report = {}
+    for name, (folder, fixture, _) in HEAD_SPECS.items():
+        p = json.loads((folder / fixture).read_text("utf-8"))
+        head = _heads[name]
+        hands = F.sort_hands([np.asarray(h, np.float32) for h in p["raw_hands"]])
+        x = F.build_features(hands, two_hand=True, rotate=False, aspect=head.aspect_for(float(p["aspect"])), extras=True)
+        fd = float(np.abs(x - np.asarray(p["expected_features"], np.float32)).max())
+        pd = float(np.abs(head.forward(x) - np.asarray(p["expected_probabilities"])).max())
+        report[name] = {"ok": fd < PARITY_FEATURE_TOL and pd < PARITY_PROB_TOL, "max_feature_diff": fd, "max_prob_diff": pd, "fixture": f"{folder.name}/{fixture}"}
+    return {"ok": all(r["ok"] for r in report.values()), "heads": report}
 
 
 def parity() -> dict:
-    alpha()
+    heads()
     return _parity

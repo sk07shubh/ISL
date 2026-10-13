@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Bar, Chip, Icon, pct } from "../components/ui";
 import { deleteTester, getAnalytics, liveTests, type Analytics, type LiveData, type Summary } from "../lib/api";
-import { loadModel } from "../lib/runtime";
+import { loadModel, loadVocab } from "../lib/runtime";
 import type { ModelInfo } from "../lib/types";
 import { AppError } from "../lib/types";
 
 type Tab = "overview" | "letters" | "confusion" | "details" | "runs";
 const TABS: { v: Tab; label: string }[] = [
-  { v: "overview", label: "Overview" }, { v: "letters", label: "Per letter" }, { v: "confusion", label: "Confusion" },
+  { v: "overview", label: "Overview" }, { v: "letters", label: "Per sign" }, { v: "confusion", label: "Confusion" },
   { v: "details", label: "Details" }, { v: "runs", label: "Runs & model" },
 ];
 const LIGHT = [["", "Any light"], ["bright", "Bright"], ["dim", "Dim"], ["mixed", "Mixed"]] as const;
@@ -189,10 +189,10 @@ function PerLetter({ a }: { a: Analytics }) {
   }), [a, key, dir, q]);
   const th = (k: K, label: string, cls = "") => <th className={cls} aria-sort={key === k ? (dir === 1 ? "ascending" : "descending") : "none"}><button className="sort" onClick={() => { if (key === k) setDir((d) => (d === 1 ? -1 : 1)); else { setKey(k); setDir(1); } }}>{label}{key === k ? (dir === 1 ? " ▲" : " ▼") : ""}</button></th>;
   return (
-    <section className="card table-card"><header className="card-head"><div><h2>Per letter</h2>
-      <p className="muted">Accuracy is how often the letter was read correctly when asked. Weakest letters are listed first.</p></div>
-      <label className="search"><Icon name="search" size={16} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search letter" aria-label="Search letter" /></label></header>
-      <div className="table-wrap"><table><thead><tr>{th("name", "Letter")}{th("asked", "Asked", "num")}<th className="num">Correct</th>{th("wrong", "Wrong shown", "num")}<th className="num">Unsure</th>{th("accuracy", "Accuracy", "num")}<th className="num">Precision</th><th>Status</th></tr></thead>
+    <section className="card table-card"><header className="card-head"><div><h2>Per sign</h2>
+      <p className="muted">Accuracy is how often the sign was read correctly when asked. Weakest signs are listed first.</p></div>
+      <label className="search"><Icon name="search" size={16} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search sign" aria-label="Search sign" /></label></header>
+      <div className="table-wrap"><table><thead><tr>{th("name", "Sign")}{th("asked", "Asked", "num")}<th className="num">Correct</th>{th("wrong", "Wrong shown", "num")}<th className="num">Unsure</th>{th("accuracy", "Accuracy", "num")}<th className="num">Precision</th><th>Status</th></tr></thead>
         <tbody>{rows.map((r) => (
           <tr key={r.key}><td><b>{r.key}</b></td><td className="num mono">{r.support}</td><td className="num mono">{r.correct}</td><td className="num mono">{r.wrong}</td><td className="num mono">{r.uncertain}</td>
             <td className="num mono">{pct(r.acc, 0)}</td><td className="num mono">{pct(r.precision, 0)}</td>
@@ -220,12 +220,12 @@ function Heat({ labels, m, unc }: { labels: string[]; m: number[][]; unc: number
 
 function RunsAndModel({ info, live, onChanged }: { info: ModelInfo | null; live: LiveData | null; onChanged: () => void }) {
   return (<>
-    <section className="card info"><h2>Model</h2>{info ? <dl>
-      <div><dt>Name</dt><dd className="mono">{info.alphabet.name}</dd></div>
-      <div><dt>Input</dt><dd className="mono">{info.alphabet.features} values per frame</dd></div>
-      <div><dt>Confidence bar</dt><dd className="mono">{info.alphabet.threshold}</dd></div>
-      <div><dt>Smoothing / hold / release</dt><dd className="mono">{info.gate.smooth} frames · {info.gate.hold_ms} ms · {info.gate.release_ms} ms</dd></div>
-      <div><dt>Matches the training code</dt><dd>{info.parity.ok ? <Chip kind="ok">Yes</Chip> : <Chip kind="err">No</Chip>}</dd></div>
+    <section className="card info"><h2>Models</h2>{info ? <dl>
+      {(["alphabet", "digit", "phrase"] as const).map((k) => (
+        <div key={k}><dt>{k === "alphabet" ? "Letters" : k === "digit" ? "Digits" : "Phrases"}</dt>
+          <dd className="mono">{info.heads[k].name} · {info.heads[k].labels.length} signs · threshold {info.heads[k].threshold}</dd></div>))}
+      <div><dt>Smoothing / stable / hold / release</dt><dd className="mono">{info.gate.smooth} frames · {info.gate.stable} stable · {info.gate.hold_ms} ms · {info.gate.release_ms} ms</dd></div>
+      <div><dt>Matches the training code</dt><dd>{info.parity.ok ? <Chip kind="ok">Yes, all three models</Chip> : <Chip kind="err">No, see details</Chip>}</dd></div>
     </dl> : <p className="muted">Loading…</p>}</section>
     <section className="card table-card"><header className="card-head"><div><h2>Test runs</h2><p className="muted">Every run, unfiltered. Delete any run you want removed.</p></div></header>
       {live?.tests.length ? <div className="table-wrap"><table><thead><tr><th>Name</th><th>Lighting</th><th>Distance</th><th>When</th><th className="num">Attempts</th><th className="num">Correct</th><th /></tr></thead><tbody>

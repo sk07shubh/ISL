@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Bar, Chip, Icon, Ring, pct } from "../components/ui";
-import { Stage, type StageState } from "../components/Stage";
+import { MODE_NAME, Stage, type StageState } from "../components/Stage";
 import { useSettings } from "../lib/settings";
 import { loadVocab, loadModel } from "../lib/runtime";
 import { speak } from "../lib/speech";
@@ -13,7 +13,7 @@ import type { ModelInfo, VocabEntry } from "../lib/types";
 
 export function Interpreter() {
   const { s, setOpen } = useSettings();
-  const [mode, setMode] = useState<Mode>("alphabet");
+  const [mode, setMode] = useState<Mode>("all");
   const [signs, setSigns] = useState<VocabEntry[]>([]);
   const [info, setInfo] = useState<ModelInfo | null>(null);
   const [view, setView] = useState<FrameInfo | null>(null);
@@ -30,7 +30,7 @@ export function Interpreter() {
   const settingsRef = useRef(s); settingsRef.current = s;
 
   useEffect(() => { loadModel().then(setInfo).catch(() => {}); }, []);
-  useEffect(() => { loadVocab(mode).then((v) => setSigns(v.signs)).catch(() => setSigns([])); }, [mode]);
+  useEffect(() => { loadVocab().then((v) => setSigns(v.signs)).catch(() => setSigns([])); }, []);
   useEffect(() => { setView(null); }, [mode]);
   const byKey = useMemo(() => new Map(signs.map((v) => [v.key, v])), [signs]);
 
@@ -55,12 +55,12 @@ export function Interpreter() {
   // ---- real-time: a recognised sign goes into the editor and is spelled out at once
   const onCommit = useCallback((label: string) => {
     const entry = byKey.get(label);
-    const kind = entry?.kind ?? (mode === "digit" ? "digit" : "letter");
+    const kind = entry?.kind ?? "letter";
     const shown = kind === "word" ? (entry?.speak || entry?.short || label) : (entry?.short ?? label);
     const sett = settingsRef.current;
     const addSpace = kind === "word" || sett.autoSpace;
     insert(addSpace ? shown + " " : shown);
-    if (sett.speakEach) speak(spellSign({ key: label, kind, speak: entry?.speak }), "en", sett.voiceURI);   // once, this sign only
+    if (sett.speakEach) speak(spellSign({ key: label, kind, speak: entry?.speak ?? undefined }), "en", sett.voiceURI);   // once, this sign only
   }, [byKey, mode, insert]);
 
   const onView = useCallback((f: FrameInfo | null) => {
@@ -90,8 +90,8 @@ export function Interpreter() {
   const matched = !!target && live === target;
   const phase = stage?.phase ?? "loading";
   const holdSec = g ? (g.holdProgress * g.holdMs) / 1000 : 0;
-  const filtered = signs.filter((v) => (v.name + " " + v.short + " " + v.category).toLowerCase().includes(q.toLowerCase()));
-  const hasDigits = !!info?.digit;
+  const inMode = signs.filter((v) => mode === "all" || v.kind === (mode === "alphabet" ? "letter" : mode === "digit" ? "digit" : "word"));
+  const filtered = inMode.filter((v) => (v.name + " " + v.short + " " + v.category).toLowerCase().includes(q.toLowerCase()));
   const words = wordCount(text);
 
   let hint = "Show your hand to the camera";
@@ -102,13 +102,11 @@ export function Interpreter() {
   return (
     <div className="page interp">
       <div className="toolbar">
-        <button className="btn btn-secondary" aria-expanded={railOpen} onClick={() => setRailOpen((o) => !o)}><Icon name="panel" size={18} /> Signs I know <span className="count">{signs.length}</span></button>
-        {hasDigits && (
-          <div className="segmented sm mode-toggle" role="radiogroup" aria-label="Recognition mode">
-            <button role="radio" aria-checked={mode === "alphabet"} className={mode === "alphabet" ? "on" : ""} onClick={() => setMode("alphabet")}>Letters A–Z</button>
-            <button role="radio" aria-checked={mode === "digit"} className={mode === "digit" ? "on" : ""} onClick={() => setMode("digit")}>Digits 0–9</button>
-          </div>
-        )}
+        <button className="btn btn-secondary" aria-expanded={railOpen} onClick={() => setRailOpen((o) => !o)}><Icon name="panel" size={18} /> Signs I know <span className="count">{inMode.length}</span></button>
+        <div className="segmented sm mode-toggle" role="radiogroup" aria-label="What to recognise">
+          {([["all", "All"], ["alphabet", "Letters"], ["digit", "Digits"], ["phrase", "Phrases"]] as [Mode, string][]).map(([m, t]) => (
+            <button key={m} role="radio" aria-checked={mode === m} className={mode === m ? "on" : ""} onClick={() => setMode(m)}>{t}</button>))}
+        </div>
         {target && <div className={`practice ${matched ? "ok" : ""}`}><Icon name={matched ? "check" : "target"} size={18} />{matched ? <>Matched <b>{byKey.get(target)?.name}</b></> : <>Try to show <b>{byKey.get(target)?.name}</b></>}
           <button className="link" onClick={() => setTarget(null)} aria-label="Clear target"><Icon name="x" size={14} /></button></div>}
         <div className="grow" />
@@ -184,7 +182,7 @@ export function Interpreter() {
 function SignTile({ v, live, target, onPick }: { v: VocabEntry; live: boolean; target: boolean; onPick: () => void }) {
   return (
     <button className={`tile ${live ? "live" : ""} ${target ? "target" : ""}`} onClick={onPick} aria-pressed={target}>
-      <span className="glyph" aria-hidden="true">{v.short}</span>
+      <span className={`glyph ${v.kind === "word" ? "wordy" : ""}`} aria-hidden="true">{v.short}</span>
       <b>{v.name}</b>
       <small>{v.category}</small>
     </button>
@@ -194,29 +192,29 @@ function SignTile({ v, live, target, onPick }: { v: VocabEntry; live: boolean; t
 function PipelineStrip({ f, info, mode, words }: { f: FrameInfo | null; info: ModelInfo | null; mode: Mode; words: number }) {
   const g = f?.gate;
   const short = (r?: string) => ({ low_prob: "Below threshold", low_margin: "Close call", unstable: "Settling", rejected: "Filling window" } as Record<string, string>)[r ?? ""] ?? "Uncertain";
-  const head = mode === "digit" ? info?.digit : info?.alphabet;
+  const n = info ? Object.keys(info.heads).length : 0;
   const tiles = [
     { icon: "camera", name: "Tracker", val: f ? `${f.ms.track.toFixed(1)} ms` : "—", sub: "MediaPipe · in browser" },
-    { icon: "cpu", name: "Classifier", val: f?.hands.length ? `${f.ms.server.toFixed(0)} ms` : "—", sub: head ? `${head.features} features · backend` : "backend" },
-    { icon: "layers", name: "Model", val: head ? `${head.labels.length} classes` : "—", sub: head?.name ?? "" },
-    { icon: "lock", name: "Gate", val: !g ? "—" : g.state === "recognised" ? "Passed" : g.state === "uncertain" ? short(g.reason) : "No hand", sub: `threshold ${info?.gate.threshold ?? 0.8}` },
-    { icon: "type", name: "Text", val: `${words} sign${words === 1 ? "" : "s"}`, sub: "sentence buffer" },
+    { icon: "cpu", name: "Classifiers", val: f?.hands.length ? `${f.ms.server.toFixed(0)} ms` : "—", sub: `${n || 3} models · backend` },
+    { icon: "layers", name: "Signs", val: info ? `${info.labels.length}` : "—", sub: `${MODE_NAME[mode]}` },
+    { icon: "lock", name: "Gate", val: !g ? "—" : g.state === "recognised" ? "Passed" : g.state === "uncertain" ? short(g.reason) : "No hand", sub: `threshold ${info?.gate.threshold ?? 0.8} · stable ${info?.gate.stable ?? 5}` },
+    { icon: "type", name: "Text", val: `${words} item${words === 1 ? "" : "s"}`, sub: "sentence" },
   ];
   return (
     <div className="pipeline" aria-label="Pipeline status">
       {tiles.map((t, i) => (<div className="p-tile" key={t.name}><span className="p-name"><Icon name={t.icon} size={16} />{t.name}</span><b className="mono">{t.val}</b><small className="mono">{t.sub}</small>{i < tiles.length - 1 && <i className="p-arrow" aria-hidden="true" />}</div>))}
-      <p className="p-foot small muted">Hand tracking runs in this browser. Only hand points are sent to the classifier on this laptop. Press <kbd>D</kbd> for the developer overlay.</p>
+      <p className="p-foot small muted">Hand tracking runs in this browser. Only hand points are sent to the classifiers on this laptop. Press <kbd>D</kbd> for the developer overlay.</p>
     </div>
   );
 }
 
 function DevOverlay({ f, info, mode }: { f: FrameInfo | null; info: ModelInfo | null; mode: Mode }) {
-  const labels = (mode === "digit" ? info?.digit?.labels : info?.alphabet.labels) ?? [];
-  const probs = f?.probs ? f.probs.map((p, i) => ({ l: labels[i], p })).sort((a, b) => b.p - a.p).slice(0, 6) : [];
+  const labels = info?.labels ?? [];
+  const probs = f?.probs ? f.probs.map((p, i) => ({ l: labels[i], p })).filter((x) => x.p > 0).sort((a, b) => b.p - a.p).slice(0, 6) : [];
   return (
     <div className="dev mono" aria-label="Developer overlay">
       <b>dev</b> server {f ? f.ms.server.toFixed(1) : "–"} ms · window {f?.buffered ?? 0}/{info?.gate.smooth ?? 8}
-      {probs.map((x) => <div key={x.l}>{String(x.l).padEnd(3)} {(x.p * 100).toFixed(1).padStart(5)}%</div>)}
+      {probs.map((x) => <div key={x.l}>{String(x.l).padEnd(10)} {(x.p * 100).toFixed(1).padStart(5)}%</div>)}
       {f?.gate && <div>{f.gate.state}{f.gate.reason ? ` (${f.gate.reason})` : ""} · hold {(f.gate.holdProgress * 100).toFixed(0)}%</div>}
     </div>
   );

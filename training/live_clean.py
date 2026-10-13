@@ -1,140 +1,463 @@
+"""Combined webcam recognizer for ISL Alphabets (A-Z), Digits (0-9), and Phrases.
+
+All three models run simultaneously in real-time, allowing seamless recognition
+across letters, numbers, and common phrase signs.
+
+Controls:
+    C = Combined mode (Alphabets + Digits + Phrases active simultaneously)
+    A = Alphabet mode only (A-Z)
+    D = Digit mode only (0-9)
+    P = Phrase mode only (10 phrases)
+    Q = Quit
 """
-live_clean.py - live webcam test with the NEW model and the same features.py used in training.
-Put it in D:\\ISL\\training\\ and run from D:\\ISL:   python training\\live_clean.py
-Keys: a = alphabet mode, d = digit mode, q = quit. The picture is mirrored for
-display only; both models see the un-mirrored frame.
-"""
-import argparse, json, time, collections
+import argparse
+import collections
+import json
+import time
 from pathlib import Path
-import cv2, joblib, numpy as np
+
+import cv2
+import joblib
+import numpy as np
 import mediapipe as mp
-from features import hands_from_mediapipe, build_features
 
-BASE = Path(__file__).resolve().parent.parent          # D:\ISL
-ap = argparse.ArgumentParser()
-ap.add_argument("--model-dir", default="model", help="folder (inside D:\\ISL) with the trained model files")
-ap.add_argument("--smooth", type=int, default=0, help="average the scores over the last N frames (try 8); 0 = old behaviour")
-args = ap.parse_args()
-MODEL_DIR = BASE / args.model_dir
+from features import build_features, hands_from_mediapipe
+
+BASE = Path(__file__).resolve().parent.parent
 TASK_FILE = BASE / "model" / "hand_landmarker.task"
-cfg = json.load(open(MODEL_DIR / "config.json"))
-labels = json.load(open(MODEL_DIR / "labels.json"))
-clf = joblib.load(MODEL_DIR / "isl_clean_mlp.joblib")
-STABLE_FRAMES = 5                  # the same letter must win this many frames in a row
 
-# The digit model is independent of --model-dir and is loaded only after D is
-# pressed. Keep it cached after the first successful load.
-DIGIT_MODEL_DIR = BASE / "model_digits"
-digit_state = None
+# Command-line configuration
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--model-dir",
+    type=Path,
+    default=Path("model_aug"),
+    help="Path to alphabet model directory (default: model_aug)",
+)
+parser.add_argument(
+    "--digit-model-dir",
+    type=Path,
+    default=Path("model_digits_v3"),
+    help="Path to digit model directory (default: model_digits_v3)",
+)
+parser.add_argument(
+    "--phrase-model-dir",
+    type=Path,
+    default=Path("model_phrases"),
+    help="Path to phrase model directory (default: model_phrases)",
+)
+parser.add_argument(
+    "--smooth",
+    type=int,
+    default=8,
+    help="Number of frames for rolling average probability smoothing (default: 8)",
+)
+parser.add_argument(
+    "--mode",
+    choices=["combined", "alphabet", "digit", "phrase"],
+    default="combined",
+    help="Initial recognizer mode (default: combined)",
+)
+args = parser.parse_args()
+
+# Resolve relative paths from project root
+ALPHABET_MODEL_DIR = (
+    args.model_dir if args.model_dir.is_absolute() else BASE / args.model_dir
+)
+DIGIT_MODEL_DIR = (
+    args.digit_model_dir
+    if args.digit_model_dir.is_absolute()
+    else BASE / args.digit_model_dir
+)
+PHRASE_MODEL_DIR = (
+    args.phrase_model_dir
+    if args.phrase_model_dir.is_absolute()
+    else BASE / args.phrase_model_dir
+)
+
+STABLE_FRAMES = 5
+SMOOTH_FRAMES = max(1, args.smooth)
 
 
-def load_digit_model():
-    global digit_state
-    if digit_state is not None:
-        return digit_state
+def load_model(model_dir, expected_labels=None, model_filename="isl_clean_mlp.joblib"):
+    config_path = model_dir / "config.json"
+    labels_path = model_dir / "labels.json"
+    model_path = model_dir / model_filename
 
-    digit_cfg = json.loads((DIGIT_MODEL_DIR / "config.json").read_text(encoding="utf-8"))
-    digit_labels = json.loads((DIGIT_MODEL_DIR / "labels.json").read_text(encoding="utf-8"))
-    digit_clf = joblib.load(DIGIT_MODEL_DIR / "isl_digits_mlp.joblib")
-    if digit_cfg.get("features") != 161:
-        raise ValueError(f"Expected 161 digit features, got {digit_cfg.get('features')!r}")
-    if digit_cfg.get("two_hand") is not True or digit_cfg.get("rotate") is not False or digit_cfg.get("extras") is not True:
-        raise ValueError("Digit model preprocessing settings do not match this live feature pipeline")
-    if "aspect" not in digit_cfg:
-        raise ValueError("Digit config is missing its training aspect ratio")
-    digit_labels = [str(label) for label in digit_labels]
-    if digit_labels != [str(n) for n in range(1, 10)]:
-        raise ValueError(f"Unexpected digit label order: {digit_labels!r}")
-    if getattr(digit_clf, "n_features_in_", None) != digit_cfg["features"]:
-        raise ValueError("Digit model input size does not match digit config")
-    if list(getattr(digit_clf, "classes_", [])) != list(range(len(digit_labels))):
-        raise ValueError("Digit model class indices do not match labels.json order")
-    digit_state = (digit_clf, digit_cfg, digit_labels)
-    print(f"Loaded digit model from {DIGIT_MODEL_DIR}")
-    return digit_state
+    for path in (config_path, labels_path, model_path):
+        if not path.is_file():
+            raise FileNotFoundError(f"Required model file not found: {path}")
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    labels = [
+        str(label) for label in json.loads(labels_path.read_text(encoding="utf-8"))
+    ]
+    classifier = joblib.load(model_path)
+
+    if expected_labels is not None and labels != expected_labels:
+        raise ValueError(f"Unexpected labels in {model_dir}: {labels}")
+
+    if classifier.n_features_in_ != config.get("features"):
+        raise ValueError(
+            f"Feature count mismatch in {model_dir}: "
+            f"model={classifier.n_features_in_}, "
+            f"config={config.get('features')}"
+        )
+
+    if list(classifier.classes_) != list(range(len(labels))):
+        raise ValueError(f"Class indices do not match labels.json in {model_dir}")
+
+    return classifier, config, labels
+
+
+def load_digit_model(model_dir):
+    config_path = model_dir / "config.json"
+    labels_path = model_dir / "labels.json"
+    model_path = model_dir / "isl_digits_mlp.joblib"
+
+    for path in (config_path, labels_path, model_path):
+        if not path.is_file():
+            raise FileNotFoundError(f"Required digit model file not found: {path}")
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    labels = [
+        str(label) for label in json.loads(labels_path.read_text(encoding="utf-8"))
+    ]
+    classifier = joblib.load(model_path)
+
+    if labels != [str(i) for i in range(10)]:
+        raise ValueError(f"Expected digit labels 0-9; found {labels}")
+
+    if classifier.n_features_in_ != config.get("features"):
+        raise ValueError(
+            f"Digit feature mismatch: model={classifier.n_features_in_}, "
+            f"config={config.get('features')}"
+        )
+
+    if list(classifier.classes_) != list(range(len(labels))):
+        raise ValueError("Digit model class indices do not match labels.json")
+
+    return classifier, config, labels
+
+
+def load_phrase_model(model_dir):
+    config_path = model_dir / "config.json"
+    labels_path = model_dir / "labels.json"
+    model_path = model_dir / "isl_phrases_mlp.joblib"
+
+    for path in (config_path, labels_path, model_path):
+        if not path.is_file():
+            raise FileNotFoundError(f"Required phrase model file not found: {path}")
+
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    labels = [
+        str(label) for label in json.loads(labels_path.read_text(encoding="utf-8"))
+    ]
+    classifier = joblib.load(model_path)
+
+    if classifier.n_features_in_ != config.get("features"):
+        raise ValueError(
+            f"Phrase feature mismatch: model={classifier.n_features_in_}, "
+            f"config={config.get('features')}"
+        )
+
+    if list(classifier.classes_) != list(range(len(labels))):
+        raise ValueError("Phrase model class indices do not match labels.json")
+
+    return classifier, config, labels
+
+
+# Load all three trained classifiers.
+alphabet_clf, alphabet_cfg, alphabet_labels = load_model(ALPHABET_MODEL_DIR)
+digit_clf, digit_cfg, digit_labels = load_digit_model(DIGIT_MODEL_DIR)
+phrase_clf, phrase_cfg, phrase_labels = load_phrase_model(PHRASE_MODEL_DIR)
+
+print(f"Loaded alphabet model: {ALPHABET_MODEL_DIR} ({len(alphabet_labels)} classes)")
+print(f"Loaded digit model:    {DIGIT_MODEL_DIR} ({len(digit_labels)} classes)")
+print(f"Loaded phrase model:   {PHRASE_MODEL_DIR} ({len(phrase_labels)} classes)")
+print("\nTri-Model Unified Recognizer ready:")
+print(f"  - Alphabets: {''.join(alphabet_labels)}")
+print(f"  - Digits:    {''.join(digit_labels)}")
+print(f"  - Phrases:   {', '.join(phrase_labels)}")
+print("\nControls:")
+print("  C = Combined (all three active simultaneously)")
+print("  A = Alphabet mode only")
+print("  D = Digit mode only")
+print("  P = Phrase mode only")
+print("  Q = Quit webcam\n")
+
+
+def make_features(hand_landmarks, config, aspect):
+    features = build_features(
+        hands_from_mediapipe(hand_landmarks),
+        two_hand=config["two_hand"],
+        rotate=config["rotate"],
+        aspect=aspect,
+        extras=config.get("extras", False),
+    )
+
+    if features is not None and len(features) != config["features"]:
+        raise ValueError(
+            f"Feature length {len(features)} does not match "
+            f"model configuration {config['features']}"
+        )
+
+    return features
+
+
+score_histories = {
+    "alphabet": collections.deque(maxlen=SMOOTH_FRAMES),
+    "digit": collections.deque(maxlen=SMOOTH_FRAMES),
+    "phrase": collections.deque(maxlen=SMOOTH_FRAMES),
+}
+
+prediction_histories = {
+    "alphabet": collections.deque(maxlen=STABLE_FRAMES),
+    "digit": collections.deque(maxlen=STABLE_FRAMES),
+    "phrase": collections.deque(maxlen=STABLE_FRAMES),
+}
+
+
+def clear_histories():
+    for history in score_histories.values():
+        history.clear()
+    for history in prediction_histories.values():
+        history.clear()
+
+
+def get_candidate(name, classifier, config, labels, hand_landmarks, aspect):
+    features = make_features(hand_landmarks, config, aspect)
+
+    if features is None:
+        score_histories[name].clear()
+        prediction_histories[name].clear()
+        return None
+
+    probabilities = classifier.predict_proba(features.reshape(1, -1))[0]
+    history = score_histories[name]
+    history.append(probabilities.copy())
+
+    averaged = np.mean(np.asarray(history), axis=0)
+    best_index = int(np.argmax(averaged))
+    confidence = float(averaged[best_index])
+    prediction = labels[best_index]
+    threshold = float(config.get("threshold", 0.8))
+
+    stable_history = prediction_histories[name]
+    stable_history.append(prediction if confidence >= threshold else None)
+
+    accepted = (
+        len(history) == SMOOTH_FRAMES
+        and len(stable_history) == STABLE_FRAMES
+        and all(item == prediction for item in stable_history)
+        and confidence >= threshold
+    )
+
+    return {
+        "name": name,
+        "prediction": prediction,
+        "confidence": confidence,
+        "accepted": accepted,
+        "threshold": threshold,
+    }
+
+
+if not TASK_FILE.is_file():
+    raise FileNotFoundError(f"MediaPipe hand landmark model not found: {TASK_FILE}")
 
 options = mp.tasks.vision.HandLandmarkerOptions(
     base_options=mp.tasks.BaseOptions(model_asset_path=str(TASK_FILE)),
-    running_mode=mp.tasks.vision.RunningMode.VIDEO, num_hands=2,
-    min_hand_detection_confidence=0.5, min_hand_presence_confidence=0.5, min_tracking_confidence=0.5)
+    running_mode=mp.tasks.vision.RunningMode.VIDEO,
+    num_hands=2,
+    min_hand_detection_confidence=0.35,
+    min_hand_presence_confidence=0.35,
+    min_tracking_confidence=0.35,
+)
 
-cap = cv2.VideoCapture(0)
-if not cap.isOpened():
-    raise SystemExit("Could not open the webcam (is another app using it?)")
-histories = {
-    "alphabet": (collections.deque(maxlen=STABLE_FRAMES), collections.deque(maxlen=max(args.smooth, 1))),
-    "digit": (collections.deque(maxlen=STABLE_FRAMES), collections.deque(maxlen=max(args.smooth, 1))),
-}
-mode = "alphabet"
+camera = cv2.VideoCapture(0)
+if not camera.isOpened():
+    raise SystemExit("Could not open webcam. Close other apps using the camera.")
 
-with mp.tasks.vision.HandLandmarker.create_from_options(options) as detector:
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        h, w = frame.shape[:2]
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        res = detector.detect_for_video(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), int(time.monotonic() * 1000))
-        shown, line2 = "no hand", ""
-        recent, prob_hist = histories[mode]
-        if res.hand_landmarks:
-            for hand in res.hand_landmarks:
-                for p in hand:
-                    cv2.circle(frame, (int(p.x * w), int(p.y * h)), 3, (0, 255, 0), -1)
-            if mode == "alphabet":
-                active_clf, active_cfg, active_labels = clf, cfg, labels
-                aspect = w / h  # preserve the existing alphabet inference behavior
-            else:
-                active_clf, active_cfg, active_labels = digit_state
-                aspect = float(active_cfg["aspect"])
-            x = build_features(
-                hands_from_mediapipe(res.hand_landmarks), active_cfg["two_hand"], active_cfg["rotate"],
-                aspect=aspect, extras=active_cfg.get("extras", False)
+current_mode = args.mode
+
+try:
+    with mp.tasks.vision.HandLandmarker.create_from_options(options) as detector:
+        while True:
+            ok, frame = camera.read()
+            if not ok:
+                print("Could not read a webcam frame.")
+                break
+
+            height, width = frame.shape[:2]
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            timestamp_ms = int(time.monotonic() * 1000)
+
+            result = detector.detect_for_video(
+                mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb),
+                timestamp_ms,
             )
-            if x is not None:
-                if len(x) != active_cfg["features"]:
-                    raise ValueError(f"{mode} feature length {len(x)} does not match model config {active_cfg['features']}")
-                probs = active_clf.predict_proba(x.reshape(1, -1))[0]
-                if args.smooth > 0:
-                    prob_hist.append(probs)
-                    probs = np.mean(prob_hist, axis=0)
-                top = np.argsort(probs)[::-1][:2]
-                prediction, conf = active_labels[top[0]], float(probs[top[0]])
-                if args.smooth > 0:
-                    shown = prediction if len(prob_hist) == args.smooth and conf >= active_cfg["threshold"] else "Uncertain"
-                else:
-                    recent.append(prediction if conf >= active_cfg["threshold"] else None)
-                    stable = len(recent) == STABLE_FRAMES and len(set(recent)) == 1 and recent[0] is not None
-                    shown = prediction if stable else "Uncertain"
-                line2 = f"{mode} | best {prediction} {conf:.2f} | next {active_labels[top[1]]} {probs[top[1]]:.2f}"
+
+            display_label = "No hand"
+            details = "Show a sign clearly"
+            badge_color = (180, 180, 180)
+
+            if result.hand_landmarks:
+                connections = [
+                    (0, 1), (1, 2), (2, 3), (3, 4),
+                    (0, 5), (5, 6), (6, 7), (7, 8),
+                    (5, 9), (9, 10), (10, 11), (11, 12),
+                    (9, 13), (13, 14), (14, 15), (15, 16),
+                    (13, 17), (17, 18), (18, 19), (19, 20),
+                    (0, 17),
+                ]
+
+                # Draw skeleton on unmirrored frame
+                for hand in result.hand_landmarks:
+                    for start, end in connections:
+                        p1, p2 = hand[start], hand[end]
+                        cv2.line(
+                            frame,
+                            (int(p1.x * width), int(p1.y * height)),
+                            (int(p2.x * width), int(p2.y * height)),
+                            (255, 180, 0),
+                            2,
+                        )
+                    for point in hand:
+                        cv2.circle(
+                            frame,
+                            (int(point.x * width), int(point.y * height)),
+                            4,
+                            (0, 255, 0),
+                            -1,
+                        )
+
+                candidates = []
+
+                # 1. Alphabet Candidate
+                if current_mode in ("combined", "alphabet"):
+                    alphabet_candidate = get_candidate(
+                        "alphabet",
+                        alphabet_clf,
+                        alphabet_cfg,
+                        alphabet_labels,
+                        result.hand_landmarks,
+                        width / height,
+                    )
+                    if alphabet_candidate is not None:
+                        candidates.append(alphabet_candidate)
+
+                # 2. Digit Candidate
+                if current_mode in ("combined", "digit"):
+                    digit_candidate = get_candidate(
+                        "digit",
+                        digit_clf,
+                        digit_cfg,
+                        digit_labels,
+                        result.hand_landmarks,
+                        float(digit_cfg.get("aspect", 1.0)),
+                    )
+                    if digit_candidate is not None:
+                        candidates.append(digit_candidate)
+
+                # 3. Phrase Candidate
+                if current_mode in ("combined", "phrase"):
+                    phrase_candidate = get_candidate(
+                        "phrase",
+                        phrase_clf,
+                        phrase_cfg,
+                        phrase_labels,
+                        result.hand_landmarks,
+                        float(phrase_cfg.get("aspect", width / height)),
+                    )
+                    if phrase_candidate is not None:
+                        candidates.append(phrase_candidate)
+
+                accepted = [item for item in candidates if item["accepted"]]
+
+                if accepted:
+                    # Best confident prediction across active models
+                    chosen = max(accepted, key=lambda item: item["confidence"])
+                    display_label = chosen["prediction"].upper()
+                    source_title = chosen["name"].capitalize()
+                    details = f"Confidence: {chosen['confidence']:.2f} | Source: {source_title}"
+
+                    if chosen["name"] == "alphabet":
+                        badge_color = (0, 255, 255)   # Yellow/Cyan
+                    elif chosen["name"] == "digit":
+                        badge_color = (0, 255, 120)   # Green
+                    else:
+                        badge_color = (0, 190, 255)   # Gold/Amber
+
+                elif candidates:
+                    best = max(candidates, key=lambda item: item["confidence"])
+                    best_source = best["name"].capitalize()
+                    display_label = "Uncertain"
+                    details = f"Uncertain | Best: {best['prediction'].upper()} {best['confidence']:.2f} ({best_source})"
+                    badge_color = (150, 150, 150)
             else:
-                recent.clear()
-                prob_hist.clear()
-                shown, line2 = "Uncertain", f"{mode} | show hand clearly"
-        else:
-            for recent, prob_hist in histories.values():
-                recent.clear()
-                prob_hist.clear()
-        view = cv2.flip(frame, 1)                       # mirror for display only
-        cv2.putText(view, shown, (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 255), 4)
-        cv2.putText(view, line2, (20, h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.imshow("ISL live test | A: alphabet | D: digits 1-9 | Q: quit", view)
-        key = cv2.waitKey(1) & 0xFF
-        if key in (ord("q"), ord("Q")):
-            break
-        elif key in (ord("a"), ord("A")):
-            mode = "alphabet"
-            for recent, prob_hist in histories.values():
-                recent.clear()
-                prob_hist.clear()
-        elif key in (ord("d"), ord("D")):
-            try:
-                digit_state = load_digit_model()
-                mode = "digit"
-                for recent, prob_hist in histories.values():
-                    recent.clear()
-                    prob_hist.clear()
-            except (OSError, ValueError, json.JSONDecodeError) as exc:
-                print(f"Could not enable digit mode: {exc}")
-cap.release()
-cv2.destroyAllWindows()
+                clear_histories()
+
+            view = cv2.flip(frame, 1)
+
+            # Draw recognition text
+            cv2.putText(
+                view,
+                display_label,
+                (20, 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.4,
+                badge_color,
+                3,
+            )
+
+            # Details line
+            cv2.putText(
+                view,
+                details,
+                (20, height - 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (255, 255, 255),
+                2,
+            )
+
+            # Header info bar
+            header_text = (
+                f"MODE: {current_mode.upper()} "
+                f"| Keys: C:Combined, A:Alpha, D:Digit, P:Phrase, Q:Quit"
+            )
+            cv2.putText(
+                view,
+                header_text,
+                (20, 100),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.52,
+                (220, 220, 220),
+                1,
+            )
+
+            cv2.imshow("ISL Tri-Model Recognizer (Alphabets + Digits + Phrases)", view)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), ord("Q")):
+                break
+            elif key in (ord("c"), ord("C")):
+                current_mode = "combined"
+                clear_histories()
+                print("Switched mode to: COMBINED (Alphabets + Digits + Phrases)")
+            elif key in (ord("a"), ord("A")):
+                current_mode = "alphabet"
+                clear_histories()
+                print("Switched mode to: ALPHABET (A-Z)")
+            elif key in (ord("d"), ord("D")):
+                current_mode = "digit"
+                clear_histories()
+                print("Switched mode to: DIGIT (0-9)")
+            elif key in (ord("p"), ord("P")):
+                current_mode = "phrase"
+                clear_histories()
+                print("Switched mode to: PHRASE (10 phrases)")
+
+finally:
+    camera.release()
+    cv2.destroyAllWindows()

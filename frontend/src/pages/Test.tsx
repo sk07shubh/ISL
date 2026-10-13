@@ -5,6 +5,7 @@ import { loadVocab } from "../lib/runtime";
 import { saveTest, type Attempt, type TestMeta } from "../lib/api";
 import type { FrameInfo } from "../lib/engine";
 import type { GateOutput, Vocabulary } from "../lib/types";
+import type { Mode } from "../lib/api";
 
 const TIMEOUT_MS = 8000;
 type Phase = "setup" | "run" | "done";
@@ -20,6 +21,7 @@ export function Test() {
   const viewRef = useRef<FrameInfo | null>(null);
   const [name, setName] = useState(() => localStorage.getItem("isl.tester") || "");
   const [light, setLight] = useState<Light | null>(null);
+  const [testMode, setTestMode] = useState<Mode>("all");
   const [dist, setDist] = useState<Dist | null>(null);
   const [phase, setPhase] = useState<Phase>("setup");
   const [queue, setQueue] = useState<string[]>([]);
@@ -31,9 +33,9 @@ export function Test() {
   const startedAt = useRef(0), lock = useRef(false), meta = useRef<TestMeta>({ tester: "anon" });
   const cur = useRef({ phase, queue, idx }); cur.current = { phase, queue, idx };
 
-  useEffect(() => { loadVocab("alphabet").then(setVocab).catch(() => {}); }, []);
+  useEffect(() => { loadVocab().then(setVocab).catch(() => {}); }, []);
   const byKey = useMemo(() => new Map((vocab?.signs ?? []).map((v) => [v.key, v])), [vocab]);
-  const pool = vocab?.signs.filter((v) => v.active) ?? [];
+  const pool = (vocab?.signs ?? []).filter((v) => v.active && (testMode === "all" || v.kind === (testMode === "alphabet" ? "letter" : testMode === "digit" ? "digit" : "word")));
   const target = phase === "run" ? queue[idx] : null;
   const ready = stage?.phase === "ready";
   const nameOk = !name.trim() || /^[A-Za-z0-9_-]{1,16}$/.test(name.trim());
@@ -89,6 +91,7 @@ export function Test() {
     const t = name.trim();
     localStorage.setItem("isl.tester", t);
     meta.current = { tester: t || "anon", lighting: light, distance: dist };
+    if (!pool.length) return;
     const keys = pool.map((p) => p.key).sort(() => Math.random() - 0.5);
     setQueue(keys); setIdx(0); setAttempts([]); setSaved("idle"); lock.current = false; setPhase("run");
   };
@@ -106,7 +109,7 @@ export function Test() {
         {phase === "run" && <Chip kind="load" pulse>Letter {idx + 1} of {queue.length}</Chip>}</header>
 
       <div className="test-grid">
-        <Stage compact mode="alphabet" onView={onView} onCommit={onCommit} onState={setStage} />
+        <Stage compact mode={testMode} onView={onView} onCommit={onCommit} onState={setStage} />
         <div className="card test-panel">
           {phase === "setup" && (<>
             <h2>Start a test</h2>
@@ -114,6 +117,12 @@ export function Test() {
             <label className="field"><span>Your name or code (optional)</span>
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Asha, or leave blank" maxLength={16} aria-label="Your name or code" />
               {!nameOk && <small className="warn-text">Use letters, digits, - or _ only.</small>}</label>
+            <div className="field"><span>What to test</span>
+              <div className="segmented" role="radiogroup" aria-label="What to test">
+                {([["all", "Everything"], ["alphabet", "Letters"], ["digit", "Digits"], ["phrase", "Phrases"]] as [Mode, string][]).map(([m, t]) => (
+                  <button key={m} role="radio" aria-checked={testMode === m} className={testMode === m ? "on" : ""} onClick={() => setTestMode(m)}>{t}</button>))}
+              </div>
+              <small className="muted">{pool.length} sign{pool.length === 1 ? "" : "s"} · each is asked once, in random order</small></div>
             <ChoiceRow label="Lighting (optional)" value={light} options={[["bright", "Bright"], ["dim", "Dim"], ["mixed", "Mixed"]]} onChange={setLight} />
             <ChoiceRow label="Distance from camera (optional)" value={dist} options={[["near", "Near"], ["medium", "Medium"], ["far", "Far"]]} onChange={setDist} />
             <button className="btn btn-primary btn-lg" onClick={start} disabled={!ready || !nameOk || !pool.length}>
@@ -122,7 +131,7 @@ export function Test() {
 
           {phase === "run" && v && (<>
             <div className="prompt-sign"><span className="muted">Show this letter</span>
-              <b className="big-glyph">{v.short}</b></div>
+              <b className={v.kind === "word" ? "big-glyph wordy-prompt" : "big-glyph"}>{v.short}</b></div>
             <div className="prompt-ring"><Ring value={Math.min(1, elapsed / TIMEOUT_MS)} size={84} stroke={8} kind="primary"><span className="mono">{Math.max(0, Math.ceil((TIMEOUT_MS - elapsed) / 1000))}s</span></Ring>
               <div><div className="conf"><span>Reads as</span><b className="mono">{g?.state === "recognised" && g.label ? byKey.get(g.label)?.short ?? g.label : "…"}</b></div>
                 <Bar value={g?.state === "recognised" ? g.holdProgress : 0} kind="ok" label="Hold progress" /></div></div>

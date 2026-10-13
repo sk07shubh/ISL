@@ -1,8 +1,8 @@
 """ISL Interpreter backend (FastAPI + SQLite).
 
-The trained model runs HERE, in the backend:
-  browser (camera + MediaPipe hand tracking) -> POST /api/predict with 21 points per hand
-  backend (features.py + model.json)          -> class probabilities
+Three trained classifiers run HERE on every frame:
+  alphabet (A-Z), digits (0-9), phrases (10 phrases)
+Browser: camera + MediaPipe hand points -> POST /api/predict -> probabilities for all three models.
 Run:  python3 scripts/run.py      API docs: http://localhost:8000/docs
 """
 import json
@@ -18,14 +18,15 @@ from pydantic import BaseModel, Field
 
 from . import analytics as A
 from . import db as D
+from . import features as F
 from . import inference as I
 
 ROOT = D.ROOT
 DIST = ROOT / "frontend" / "dist"
-HOLD_MS, RELEASE_MS = 600, 300     # sign must be held this long before it is added to the sentence
+HOLD_MS, RELEASE_MS = 600, 300     # a sign must be held this long before it is added to the sentence
 
-app = FastAPI(title="ISL Interpreter API", version="3.0.0",
-              description="Trained ISL classifier (model_aug, from training/). Live predictions via /api/predict.")
+app = FastAPI(title="ISL Interpreter API", version="4.0.0",
+              description="Alphabet, digit and phrase classifiers from training/live_clean.py, run in the backend. Live predictions via /api/predict.")
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -37,78 +38,86 @@ def _startup():
 
 class HandsIn(BaseModel):
     hands: List[List[List[float]]] = Field(max_length=2, description="Up to 2 hands, each 21 points of [x, y, z] (MediaPipe normalised)")
-    aspect: float = Field(gt=0.1, lt=10, description="Video width / height, as in live_clean.py")
-    mode: Literal["alphabet", "digit"] = "alphabet"
+    aspect: float = Field(gt=0.1, lt=10, description="Camera frame width / height")
 
 
 class Attempt(BaseModel):
     target: str
-    predicted: Optional[str] = Field(default=None, description="Committed sign, or null if the app stayed Uncertain until timeout")
+    predicted: Optional[str] = Field(default=None, description="Committed sign, or null if the app stayed unsure until timeout")
     confidence: Optional[float] = None
     margin: Optional[float] = None
-    top_label: Optional[str] = Field(default=None, description="Best label at the moment of decision, shown or not")
+    top_label: Optional[str] = Field(default=None, description="Best sign at the moment of decision, shown or not")
     top_conf: Optional[float] = None
-    elapsed_ms: Optional[int] = Field(default=None, ge=0, le=600000, description="Time from prompt to decision")
-    hand_size: Optional[float] = Field(default=None, ge=0, le=2, description="Wrist to middle knuckle, image-width units")
-    brightness: Optional[float] = Field(default=None, ge=0, le=255, description="Mean video luma, 0-255")
+    elapsed_ms: Optional[int] = Field(default=None, ge=0, le=600000)
+    hand_size: Optional[float] = Field(default=None, ge=0, le=2)
+    brightness: Optional[float] = Field(default=None, ge=0, le=255)
 
 
 class TestIn(BaseModel):
-    tester: str = Field(pattern=r"^[A-Za-z0-9_-]{1,16}$", description="Anonymous tester code, e.g. T01")
+    tester: str = Field(pattern=r"^[A-Za-z0-9_ -]{1,16}$", description="Optional name or code")
     lighting: Optional[Literal["bright", "dim", "mixed"]] = None
     distance: Optional[Literal["near", "medium", "far"]] = None
     note: Optional[str] = None
     attempts: List[Attempt] = Field(min_length=1, max_length=500)
 
 
-def _head(mode: str) -> I.Head:
-    if mode == "alphabet":
-        return I.alpha()
-    h = I.digit()
-    if h is None:
-        raise HTTPException(404, "Digit model is not installed. Add the model_digits/ folder (training/live_clean.py needs it too).")
-    return h
+def _all_head_info():
+    out = {}
+    for name, h in I.heads().items():
+        out[name] = {"name": f"{h.folder.name}", "labels": h.labels, "threshold": h.threshold, "features": h.cfg["features"],
+                     "aspect": h.cfg.get("aspect"), "kind": h.kind}
+    return out
+
+
+def _vocab_entries():
+    """Every sign the app can produce, with how to show and speak it."""
+    entries = []
+    for name, key in I.all_labels():
+        h = I.heads()[name]
+        if h.kind == "letter":
+            entries.append({"key": key, "group": "Letters", "kind": "letter", "name": key, "short": key, "speak": None})
+        elif h.kind == "digit":
+            entries.append({"key": key, "group": "Digits", "kind": "digit", "name": key, "short": key, "speak": None})
+        else:
+            entries.append({"key": key, "group": "Phrases", "kind": "word", "name": key, "short": key, "speak": key})
+    for e in entries:
+        e.update({"names": {"en": e["name"]}, "category": e["group"], "description": "", "image": "", "verified": False, "active": True, "note": ""})
+    return entries
 
 
 @app.get("/health", tags=["ops"])
 def health():
-    return {"status": "ok", "alphabet": True, "digits": I.digit() is not None,
-            "tracker_file": I.TASK_FILE.exists(), "parity_ok": I.parity()["ok"], "time": D.now()}
+    p = I.parity()
+    return {"status": "ok", "heads": sorted(I.heads().keys()), "tracker_file": I.TASK_FILE.exists(), "parity_ok": p["ok"], "time": D.now()}
 
 
 @app.get("/api/model", tags=["model"])
 def model_info():
-    a, d = I.alpha(), I.digit()
-    def describe(h):
-        return None if h is None else {"name": h.name, "labels": h.labels, "threshold": h.threshold,
-                                       "features": h.cfg["features"], "aspect": h.cfg.get("aspect")}
-    return {"alphabet": describe(a), "digit": describe(d),
-            "gate": {"threshold": a.threshold, "smooth": I.SMOOTH, "hold_ms": HOLD_MS, "release_ms": RELEASE_MS},
-            "parity": I.parity(), "source": "training/live_clean.py + model_aug/ (exported from isl_clean_mlp.joblib)"}
+    heads = _all_head_info()
+    return {"heads": heads, "labels": [e["key"] for e in _vocab_entries()],
+            "gate": {"threshold": min(h["threshold"] for h in heads.values()), "smooth": I.SMOOTH, "stable": I.STABLE,
+                     "hold_ms": HOLD_MS, "release_ms": RELEASE_MS},
+            "parity": I.parity(), "source": "training/live_clean.py (model_aug, model_digits_v3, model_phrases)"}
 
 
 @app.get("/api/vocabulary", tags=["vocabulary"])
-def vocabulary(mode: Literal["alphabet", "digit"] = "alphabet"):
-    h = _head(mode)
-    cat = "Numerals" if mode == "digit" else "Alphabet"
-    kind = "digit" if mode == "digit" else "letter"
-    signs = [{"key": k, "kind": kind, "name": {"en": k}, "names": {"en": k}, "short": k, "category": cat, "description": "",
-              "image": "", "verified": False, "active": True, "note": ""} for k in h.labels]
-    return {"mode": mode, "signs": signs}
+def vocabulary():
+    return {"signs": _vocab_entries()}
 
 
 @app.post("/api/predict", tags=["live"])
 def predict(body: HandsIn):
-    """One frame of hand points -> probabilities over the classes (same as live_clean.py)."""
+    """One frame of hand points -> probabilities from all three classifiers (as live_clean.py computes them)."""
     for h in body.hands:
         if len(h) != 21 or any(len(p) != 3 for p in h):
             raise HTTPException(422, "each hand must have 21 points of [x, y, z]")
-    head = _head(body.mode)
-    aspect = head.cfg["aspect"] if body.mode == "digit" else body.aspect   # digit model uses its own training aspect
-    probs = head.classify([np.asarray(h, np.float32) for h in body.hands], float(aspect))
-    if probs is None:
-        return {"probs": None, "labels": head.labels, "reason": "no_usable_hand"}
-    return {"probs": [round(float(p), 6) for p in probs], "labels": head.labels, "reason": None}
+    hands = F.sort_hands([np.asarray(h, np.float32) for h in body.hands])
+    out = {}
+    for name, head in I.heads().items():
+        probs = head.classify(hands, body.aspect) if hands else None
+        out[name] = None if probs is None else {"probs": [round(float(p), 6) for p in probs], "labels": head.labels}
+    reason = None if any(v for v in out.values()) else "no_usable_hand"
+    return {"heads": out, "reason": reason}
 
 
 @app.post("/api/live-tests", status_code=201, tags=["live tests"])
@@ -139,12 +148,12 @@ def _attempt_rows(lighting=None, distance=None):
 
 @app.get("/api/analytics", tags=["live tests"])
 def analytics_endpoint(lighting: Optional[Literal["bright", "dim", "mixed"]] = None, distance: Optional[Literal["near", "medium", "far"]] = None):
-    """Live-test metrics, filtered by lighting and distance. All numbers are computed here, not in the browser."""
-    labels = I.alpha().labels
-    thr = I.alpha().threshold
+    """Live-test metrics, filtered by lighting and distance. All numbers are computed here."""
+    labels = [e["key"] for e in _vocab_entries()]
+    thr = min(h.threshold for h in I.heads().values())
     rows = _attempt_rows(lighting, distance)
     filters = {"lighting": lighting, "distance": distance}
-    return {**A.analytics(rows, thr, labels, filters), "model": I.alpha().name, "parity_ok": I.parity()["ok"]}
+    return {**A.analytics(rows, thr, labels, filters), "parity_ok": I.parity()["ok"]}
 
 
 @app.get("/api/live-tests", tags=["live tests"])
@@ -161,7 +170,7 @@ def live_tests():
 
 @app.delete("/api/live-tests/{tester}", tags=["live tests"])
 def delete_tester(tester: str):
-    if not re.match(r"^[A-Za-z0-9_-]{1,16}$", tester):
+    if not re.match(r"^[A-Za-z0-9_ -]{1,16}$", tester):
         raise HTTPException(422, "bad tester code")
     with D.db() as con:
         n = con.execute("DELETE FROM live_tests WHERE tester=?", (tester,)).rowcount

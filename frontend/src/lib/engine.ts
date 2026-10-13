@@ -11,22 +11,73 @@ export interface FrameInfo {
 }
 export const CONNECTIONS: [number, number][] = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[0,17],[17,18],[18,19],[19,20]];
 
+export interface HeadSpec { labels: string[]; threshold: number }
 export interface EngineOpts {
   video: HTMLVideoElement | null; canvas: HTMLCanvasElement | null; tracker: Tracker; gate: Gate; mode: Mode; smooth: number;
+  heads: Record<string, HeadSpec>; labels: string[];        // labels: every sign in backend order
   skeleton: () => boolean; onFrame?: (f: FrameInfo) => void; onCommit?: (label: string, g: GateOutput) => void;
 }
 
+/** Where each sign lives: which model, and its position in that model's output. */
+export function buildSlots(labels: string[], heads: Record<string, HeadSpec>): { head: string; j: number }[] {
+  return labels.map((key) => {
+    for (const [head, spec] of Object.entries(heads)) { const j = spec.labels.indexOf(key); if (j >= 0) return { head, j }; }
+    return { head: "", j: -1 };
+  });
+}
+
 /**
- * Per-frame loop: MediaPipe finds the hand points in the browser; the backend classifies them.
- * Probabilities are averaged over the last `smooth` results (live_clean.py --smooth 8), and the
- * gate shows a sign only once that average is above the threshold.
+ * The combined decision for one frame, as training/live_clean.py makes it.
+ * histories: the last few probability vectors of each model. Returns one value per sign (0 = not counted),
+ * or null while no model has a full smoothing window yet.
+ */
+export function combine(labels: string[], heads: Record<string, HeadSpec>, slots: { head: string; j: number }[],
+                        histories: Record<string, Float64Array[]>, active: Set<string>, smooth: number): Float64Array | null {
+  const avg: Record<string, Float64Array> = {};
+  let anyFull = false;
+  for (const h of Object.keys(heads)) {
+    const rows = histories[h] ?? [];
+    if (active.has(h) && rows.length >= smooth) {
+      anyFull = true;
+      const a = new Float64Array(rows[0].length);
+      for (const r of rows) for (let i = 0; i < r.length; i++) a[i] += r[i] / rows.length;
+      avg[h] = a;
+    }
+  }
+  if (!anyFull) return null;
+  const out = new Float64Array(labels.length);
+  slots.forEach((s, i) => {
+    if (!avg[s.head]) return;
+    const p = avg[s.head][s.j];
+    out[i] = p >= heads[s.head].threshold ? p : 0;      // below the model's own threshold: not counted
+  });
+  return out;
+}
+
+/**
+ * Per-frame loop, the same rules as training/live_clean.py in combined mode:
+ *  - MediaPipe finds the hand points in the browser; the backend runs all three classifiers on them.
+ *  - each classifier is averaged over the last `smooth` frames;
+ *  - a classifier's sign counts only if its average reaches that classifier's own threshold;
+ *  - the most confident counted sign across the three classifiers is passed to the gate, which requires it to be
+ *    the same for `stable` frames and held for the hold time before it is added to the sentence.
  */
 export class Engine {
   private raf = 0; private running = false; private lastVT = -1; private fpsT = performance.now(); private fpsN = 0; private fps = 0; private lastTs = 0;
-  private inflight = false; private hist: Float64Array[] = [];
-  constructor(private o: EngineOpts) {}
-  start() { if (this.running) return; this.running = true; this.hist = []; this.o.gate.reset(); this.loop(); }
+  private inflight = false; private hist: Record<string, Float64Array[]> = {};
+  private slots: { head: string; j: number }[];
+  private active: Set<string>;
+  constructor(private o: EngineOpts) {
+    this.active = new Set(o.mode === "all" ? Object.keys(o.heads) : [o.mode]);
+    this.slots = buildSlots(o.labels, o.heads);
+    for (const h of Object.keys(o.heads)) this.hist[h] = [];
+  }
+  start() { if (this.running) return; this.running = true; for (const h of Object.keys(this.hist)) this.hist[h] = []; this.o.gate.reset(); this.loop(); }
   stop() { this.running = false; cancelAnimationFrame(this.raf); const c = this.o.canvas; c?.getContext("2d")?.clearRect(0, 0, c.width, c.height); }
+
+  private combined(): Float64Array | null {
+    return combine(this.o.labels, this.o.heads, this.slots, this.hist, this.active, this.o.smooth);
+  }
 
   private loop = () => {
     if (!this.running) return;
@@ -42,21 +93,24 @@ export class Engine {
     try { hands = tracker.detect(video, ts).hands; } catch { hands = []; }
     const tTrack = performance.now() - now;
 
-    if (!hands.length) this.hist = [];
+    if (!hands.length) for (const h of Object.keys(this.hist)) this.hist[h] = [];
     else if (!this.inflight) {
       this.inflight = true;
-      const aspect = (video.videoWidth || 640) / (video.videoHeight || 480);   // frame width / height, as in live_clean.py
+      const aspect = (video.videoWidth || 640) / (video.videoHeight || 480);   // camera frame width / height
       const t0 = performance.now();
-      predictFrame(hands.map((h) => h.landmarks as Landmark[]), aspect, this.o.mode)
+      predictFrame(hands.map((h) => h.landmarks as Landmark[]), aspect)
         .then((r) => {
           this.serverMs = performance.now() - t0;
-          if (r.probs) { this.hist.push(Float64Array.from(r.probs)); if (this.hist.length > this.o.smooth) this.hist.shift(); }
-          else this.hist = [];
+          for (const h of Object.keys(this.hist)) {
+            const res = r.heads[h];
+            if (res?.probs) { this.hist[h].push(Float64Array.from(res.probs)); if (this.hist[h].length > this.o.smooth) this.hist[h].shift(); }
+            else this.hist[h] = [];
+          }
         })
-        .catch(() => { this.hist = []; })
+        .catch(() => { for (const h of Object.keys(this.hist)) this.hist[h] = []; })
         .finally(() => { this.inflight = false; });
     }
-    const probs = this.hist.length >= this.o.smooth ? average(this.hist) : null;
+    const probs = this.combined();
     const g = gate.update(now, hands.length > 0, probs);
     if (g.committed) this.o.onCommit?.(g.committed, g);
 
@@ -65,7 +119,8 @@ export class Engine {
     this.draw(hands, g);
     const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
     const handSize = hands[0] ? Math.hypot(hands[0].landmarks[9][0] - hands[0].landmarks[0][0], (hands[0].landmarks[9][1] - hands[0].landmarks[0][1]) * vh / vw) : null;
-    this.o.onFrame?.({ t: now, hands, probs: probs ? Array.from(probs) : null, gate: g, fps: this.fps, buffered: this.hist.length,
+    const windowLen = Math.max(0, ...Object.values(this.hist).map((r) => r.length));
+    this.o.onFrame?.({ t: now, hands, probs: probs ? Array.from(probs) : null, gate: g, fps: this.fps, buffered: windowLen,
       ms: { track: tTrack, server: this.serverMs, total: performance.now() - now }, brightness: this.bright, handSize });
   };
   private serverMs = 0;
@@ -101,8 +156,3 @@ export class Engine {
   }
 }
 
-function average(rows: Float64Array[]): Float64Array {
-  const out = new Float64Array(rows[0].length);
-  for (const r of rows) for (let i = 0; i < r.length; i++) out[i] += r[i] / rows.length;
-  return out;
-}

@@ -1,6 +1,6 @@
 import { AppError, type Landmark } from "./types";
 
-export type Mode = "alphabet" | "digit";
+export type Mode = "all" | "alphabet" | "digit" | "phrase";
 
 export async function getJson<T>(url: string, file = url): Promise<T> {
   let r: Response;
@@ -15,9 +15,9 @@ export async function getJson<T>(url: string, file = url): Promise<T> {
 
 export const health = async () => { try { return (await fetch("/health")).ok; } catch { return false; } };
 
-/** One frame of hand points to the trained classifier running in the backend. */
-export async function predictFrame(hands: Landmark[][], aspect: number, mode: Mode): Promise<{ probs: number[] | null; labels: string[] }> {
-  const r = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hands, aspect, mode }) });
+/** One frame of hand points -> probabilities from all three classifiers. */
+export async function predictFrame(hands: Landmark[][], aspect: number): Promise<{ heads: Record<string, { probs: number[]; labels: string[] } | null>; reason: string | null }> {
+  const r = await fetch("/api/predict", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hands, aspect }) });
   if (!r.ok) throw new Error(`predict failed (${r.status})`);
   return r.json();
 }

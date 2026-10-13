@@ -15,9 +15,18 @@ Allow camera access. Hold a sign steady for about half a second to add it to the
 
 ## Run the desktop webcam demo (teammate's workflow)
 ```
-python3 training/live_clean.py --model-dir model_aug --smooth 8
+python3 training/live_clean.py
 ```
-Press **A** for alphabet, **D** for digits 1–9, **Q** to quit. Digit mode needs the `model_digits/` folder, which is not in the repo yet.
+Press **C** for all three models together (default), **A** letters, **D** digits, **P** phrases, **Q** to quit.
+
+## Three models, one webcam
+| Model | Folder | Signs |
+|---|---|---|
+| Letters | `model_aug/` | A–Z |
+| Digits | `model_digits_v3/` | 0–9 |
+| Phrases | `model_phrases/` | answer, book, break, how are you, i need help, mistake, please, stop, this, where |
+
+Every frame, the browser sends the hand points once. The backend runs all three classifiers, and the app applies the same rules as `live_clean.py`: each model is averaged over 8 frames, a sign counts only above its model's threshold, the sign must stay the top choice for 5 frames, and the most confident counted sign wins.
 
 ## Screens
 - **Interpreter**: live camera, skeleton, recognised letter with hold ring, top 3, sentence builder (Speak / Space / Back / Clear), "Signs I know" practice tiles.
@@ -32,9 +41,10 @@ Probabilities are averaged over the last 8 frames (`--smooth 8`). A letter is sh
 backend/app/        API (main.py), classifier (inference.py), features.py (= training/features.py), SQLite for live tests
 frontend/           React + Vite app (built into frontend/dist, which is committed)
 model/              hand_landmarker.task (MediaPipe)
-model_aug/          trained classifier: model.json (exported weights), labels.json, config.json, parity_test.json,
-                    isl_clean_mlp.joblib (the scikit-learn original)
-training/           teammate's training and live scripts (unchanged)
+model_aug/          letters: model.json (exported weights), labels.json, config.json, parity_test.json, joblib original
+model_digits_v3/    digits: same layout, from the teammate's update
+model_phrases/      phrases: same layout, from the teammate's update
+training/           teammate's training and live scripts (live_clean.py runs all three models)
 mediapipe/wasm/     MediaPipe runtime files for the browser
 scripts/            setup.py, run.py
 ```
@@ -43,7 +53,8 @@ scripts/            setup.py, run.py
 When the classifier is retrained, export the new `model.json`, `labels.json`, `config.json`, and `parity_test.json` into `model_aug/`, then restart `run.py`. The backend refuses to start if the parity check fails.
 
 ## Limitations
-- Static letters only. Continuous signing and full sentences are not recognised.
+- All signs are single static shapes. Continuous signing and full sentences are not recognised.
+- The phrase model's test split is small (the teammate's metrics show about 92% accuracy). Treat that as an estimate.
 - The test metrics included in the training repo are not repeated here. Accuracy shown in the app is what the Live test measures.
 
 ## Test metrics

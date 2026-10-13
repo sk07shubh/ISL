@@ -4,11 +4,11 @@ export interface TrackHand { landmarks: Landmark[]; hand: Handedness; score: num
 export interface TrackResult { hands: TrackHand[] }
 
 export interface VocabEntry {
-  kind: "letter" | "digit" | "word"; speak?: string;
+  kind: "letter" | "digit" | "word"; speak?: string | null; group: "Letters" | "Digits" | "Phrases";
   key: string; name: string; names: { en: string; hi?: string; mr?: string }; short: string; category: string;
   description: string; image: string; verified: boolean; active: boolean; note: string;
 }
-export interface Vocabulary { mode: "alphabet" | "digit"; signs: VocabEntry[] }
+export interface Vocabulary { signs: VocabEntry[] }
 
 export interface GateConfig {
   min_prob: number; min_margin: number; smoothing_window: number; smoothing_agree: number; hold_ms: number; release_ms: number;
@@ -25,11 +25,12 @@ export interface GateOutput {
   locked: boolean;
 }
 
-export interface ModelHead { name: string; labels: string[]; threshold: number; features: number; aspect: number | null }
+export interface ModelHead { name: string; labels: string[]; threshold: number; features: number; aspect: number | null; kind: "letter" | "digit" | "word" }
 export interface ModelInfo {
-  alphabet: ModelHead; digit: ModelHead | null;
-  gate: { threshold: number; smooth: number; hold_ms: number; release_ms: number };
-  parity: { ok: boolean; max_feature_diff: number; max_prob_diff: number; fixture: string };
+  heads: Record<"alphabet" | "digit" | "phrase", ModelHead>;
+  labels: string[];
+  gate: { threshold: number; smooth: number; stable: number; hold_ms: number; release_ms: number };
+  parity: { ok: boolean; heads: Record<string, { ok: boolean; max_feature_diff: number; max_prob_diff: number; fixture: string }> };
   source: string;
 }
 

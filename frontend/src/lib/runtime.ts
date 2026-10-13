@@ -1,21 +1,20 @@
-import { getJson, type Mode } from "./api";
+import { getJson } from "./api";
 import type { GateConfig, ModelInfo, Vocabulary } from "./types";
 
 let infoP: Promise<ModelInfo> | null = null;
-const vocabP = new Map<Mode, Promise<Vocabulary>>();
-export const resetRuntime = () => { infoP = null; vocabP.clear(); };
+let vocabP: Promise<Vocabulary> | null = null;
+export const resetRuntime = () => { infoP = null; vocabP = null; };
 
-/** Model description from the backend: labels, threshold, smoothing, parity check. Loaded once. */
+/** Model description from the backend: all three heads, their labels, thresholds, smoothing and parity. Loaded once. */
 export const loadModel = (): Promise<ModelInfo> =>
   (infoP ??= getJson<ModelInfo>("/api/model", "/api/model").catch((e) => { infoP = null; throw e; }));
 
-export function loadVocab(mode: Mode): Promise<Vocabulary> {
-  if (!vocabP.has(mode))
-    vocabP.set(mode, getJson<Vocabulary>(`/api/vocabulary?mode=${mode}`, "/api/vocabulary").catch((e) => { vocabP.delete(mode); throw e; }));
-  return vocabP.get(mode)!;
-}
+/** Every sign: letters, digits and phrases. */
+export const loadVocab = (): Promise<Vocabulary> =>
+  (vocabP ??= getJson<Vocabulary>("/api/vocabulary", "/api/vocabulary").catch((e) => { vocabP = null; throw e; }));
 
-/** The app's sign-commit rules, fed with the same threshold and smoothing as live_clean.py. */
+/** Gate rules. Each model's own threshold is applied in the engine; the gate gets the lowest one. */
 export function gateConfig(info: ModelInfo): GateConfig {
-  return { min_prob: info.gate.threshold, min_margin: 0, smoothing_window: 1, smoothing_agree: 1, hold_ms: info.gate.hold_ms, release_ms: info.gate.release_ms };
+  return { min_prob: info.gate.threshold, min_margin: 0, smoothing_window: info.gate.stable, smoothing_agree: 1,
+           hold_ms: info.gate.hold_ms, release_ms: info.gate.release_ms };
 }

@@ -9,6 +9,8 @@ import { Gate } from "../lib/gate";
 import type { Mode } from "../lib/api";
 import { AppError, type GateOutput, type ModelInfo } from "../lib/types";
 
+export const MODE_NAME: Record<Mode, string> = { all: "letters · digits · phrases", alphabet: "letters", digit: "digits", phrase: "phrases" };
+
 export interface StageState { phase: "loading" | "ready" | "blocked" | "nocamera" | "error"; error?: AppError; camLabel: string; info: ModelInfo | null }
 interface Props {
   mode: Mode; compact?: boolean;
@@ -53,11 +55,11 @@ export function Stage(p: Props) {
 
   useEffect(() => {
     if (phase !== "ready" || !assets) return;
-    const head = p.mode === "digit" ? assets.info.digit : assets.info.alphabet;
-    if (!head) return;
+    const info = assets.info;
+    const heads = Object.fromEntries(Object.entries(info.heads).map(([k, h]) => [k, { labels: h.labels, threshold: h.threshold }]));
     const eng = new Engine({
-      video: cam.videoRef.current, canvas: canvasRef.current, tracker: assets.tracker, mode: p.mode, smooth: assets.info.gate.smooth,
-      gate: new Gate(head.labels, gateConfig(assets.info), "__none__"), skeleton: () => opt.current.showSkeleton,
+      video: cam.videoRef.current, canvas: canvasRef.current, tracker: assets.tracker, mode: p.mode, smooth: info.gate.smooth,
+      heads, labels: info.labels, gate: new Gate(info.labels, gateConfig(info), "__none__"), skeleton: () => opt.current.showSkeleton,
       onFrame: (f) => { snap.current = f; cb.current.onFrame?.(f); }, onCommit: (l, g) => cb.current.onCommit?.(l, g),
     });
     eng.start();
@@ -75,7 +77,7 @@ export function Stage(p: Props) {
       <canvas ref={canvasRef} aria-hidden="true" />
       <div className="hud hud-tl">
         <div role="status" aria-live="polite">{chip}</div>
-        {phase === "ready" && <span className="badge mono">{p.mode === "digit" ? "digits" : "letters"} · {view ? Math.round(view.fps) : 0} fps{view && view.hands.length ? ` · ${view.hands.length} hand${view.hands.length > 1 ? "s" : ""}` : ""}</span>}
+        {phase === "ready" && <span className="badge mono">{MODE_NAME[p.mode]} · {view ? Math.round(view.fps) : 0} fps{view && view.hands.length ? ` · ${view.hands.length} hand${view.hands.length > 1 ? "s" : ""}` : ""}</span>}
       </div>
       {phase === "ready" && cam.label && !p.compact && <div className="hud hud-br"><span className="badge"><Icon name="camera" size={14} /> {cam.label}</span></div>}
       {phase === "ready" && p.overlay?.(view)}
