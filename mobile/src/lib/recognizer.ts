@@ -1,64 +1,55 @@
 import { combine, buildSlots, type HeadSpec, type Slot } from "./combine";
 import { Gate } from "./gate";
-import { predictFrame, type Landmark, type Mode } from "./api";
-import type { GateOutput, ModelInfo, TrackHand } from "./types";
+import { classifyAll } from "./onDevice";
+import { HEADS, type HeadName } from "./onDevice";
+import { GATE } from "./config";
+import { LABELS } from "./vocab";
+import type { Hand } from "./features";
+import type { GateOutput } from "./types";
+import type { Mode } from "./api";
 
-export interface RecognizerFrame { gate: GateOutput; probs: number[] | null; buffered: number; serverMs: number }
+export interface RecognizerFrame { gate: GateOutput; probs: number[] | null; buffered: number }
+
+const specs: Record<string, HeadSpec> = Object.fromEntries((Object.keys(HEADS) as HeadName[]).map((n) => [n, { labels: HEADS[n].labels, threshold: HEADS[n].threshold }]));
+const slots: Slot[] = buildSlots(LABELS, specs);
+const minThreshold = Math.min(...Object.values(specs).map((s) => s.threshold));
 
 /**
- * The phone-side recogniser. It receives hand points from the tracker, asks the backend for the three classifiers,
- * and runs the same smoothing, threshold, stability and hold rules as the web app.
- * It has no camera or DOM code, so it can be unit-tested and reused.
+ * The phone-side recogniser. All computation happens on the device, synchronously, once per camera frame:
+ * features -> three classifiers -> smoothing -> thresholds -> stability -> hold. Same rules as the website.
  */
 export class Recognizer {
   private hist: Record<string, Float64Array[]> = {};
-  private slots: Slot[];
   private active: Set<string>;
-  private inflight = false;
-  private lastServerMs = 0;
   private gate: Gate;
 
-  constructor(private info: ModelInfo, mode: Mode) {
-    this.active = new Set(mode === "all" ? Object.keys(info.heads) : [mode]);
-    this.heads = Object.fromEntries(Object.entries(info.heads).map(([k, h]) => [k, { labels: h.labels, threshold: h.threshold }])) as Record<string, HeadSpec>;
-    this.slots = buildSlots(info.labels, this.heads);
-    for (const h of Object.keys(this.heads)) this.hist[h] = [];
-    const minThreshold = Math.min(...Object.values(this.heads).map((h) => h.threshold));
-    this.gate = new Gate(info.labels, { min_prob: minThreshold, min_margin: 0, smoothing_window: info.gate.stable, smoothing_agree: 1, hold_ms: info.gate.hold_ms, release_ms: info.gate.release_ms }, "__none__");
+  constructor(mode: Mode) {
+    this.active = new Set(mode === "all" ? Object.keys(HEADS) : [mode]);
+    for (const h of Object.keys(specs)) this.hist[h] = [];
+    this.gate = new Gate(LABELS, { min_prob: minThreshold, min_margin: 0, smoothing_window: GATE.stable, smoothing_agree: 1, hold_ms: GATE.hold_ms, release_ms: GATE.release_ms }, "__none__");
   }
-  private heads: Record<string, HeadSpec>;
 
   setMode(mode: Mode) {
-    this.active = new Set(mode === "all" ? Object.keys(this.info.heads) : [mode]);
+    this.active = new Set(mode === "all" ? Object.keys(HEADS) : [mode]);
     this.reset();
   }
 
   reset() { for (const h of Object.keys(this.hist)) this.hist[h] = []; this.gate.reset(); }
 
-  /** Call once per camera frame with that frame's hand points (or [] if none). Returns the state to show. */
-  async push(hands: TrackHand[], aspect: number, now: number): Promise<RecognizerFrame> {
-    if (!hands.length) {
+  /** One camera frame: its hand points (raw MediaPipe, 21 points each) and the frame's width/height. */
+  process(hands: Hand[], frameAspect: number, now: number): RecognizerFrame {
+    if (hands.length === 0) {
       for (const h of Object.keys(this.hist)) this.hist[h] = [];
-    } else if (!this.inflight) {
-      this.inflight = true;
-      const t0 = Date.now();
-      try {
-        const r = await predictFrame(hands.map((h) => h.landmarks as Landmark[]), aspect);
-        this.lastServerMs = Date.now() - t0;
-        for (const h of Object.keys(this.hist)) {
-          const res = r.heads[h];
-          if (res?.probs) { this.hist[h].push(Float64Array.from(res.probs)); if (this.hist[h].length > this.info.gate.smooth) this.hist[h].shift(); }
-          else this.hist[h] = [];
-        }
-      } catch {
-        for (const h of Object.keys(this.hist)) this.hist[h] = [];
-      } finally {
-        this.inflight = false;
+    } else {
+      const out = classifyAll(hands, frameAspect);
+      for (const h of Object.keys(this.hist)) {
+        const p = out[h as HeadName];
+        if (p) { this.hist[h].push(p); if (this.hist[h].length > GATE.smooth) this.hist[h].shift(); }
+        else this.hist[h] = [];
       }
     }
-    const probs = combine(this.info.labels, this.heads, this.slots, this.hist, this.active, this.info.gate.smooth);
+    const probs = combine(LABELS, specs, slots, this.hist, this.active, GATE.smooth);
     const gate = this.gate.update(now, hands.length > 0, probs);
-    const buffered = Math.max(0, ...Object.values(this.hist).map((r) => r.length));
-    return { gate, probs: probs ? Array.from(probs) : null, buffered, serverMs: this.lastServerMs };
+    return { gate, probs: probs ? Array.from(probs) : null, buffered: Math.max(0, ...Object.values(this.hist).map((r) => r.length)) };
   }
 }

@@ -5,15 +5,36 @@
     "version": "2.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "splash": { "backgroundColor": "#f8fafc" },
-    "platforms": ["android", "ios"],
-    "plugins": [["expo-camera", { "cameraPermission": "The interpreter reads hand signs from the camera. Video stays on this phone; only hand points are sent to the server." }]],
+    "splash": {
+      "backgroundColor": "#f8fafc"
+    },
+    "platforms": [
+      "android",
+      "ios"
+    ],
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "The interpreter reads hand signs from the camera. Video stays on this phone."
+        }
+      ],
+      "expo-screen-orientation"
+    ],
     "android": {
       "package": "com.islinterpreter.app",
       "versionCode": 2,
-      "permissions": ["android.permission.CAMERA", "android.permission.RECORD_AUDIO"]
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
     },
-    "ios": { "bundleIdentifier": "com.islinterpreter.app" },
-    "extra": { "eas": { "projectId": "REPLACE_WITH_EAS_PROJECT_ID" } }
+    "ios": {
+      "bundleIdentifier": "com.islinterpreter.app"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      }
+    }
   }
 }

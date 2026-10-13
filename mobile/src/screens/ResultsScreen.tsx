@@ -5,7 +5,7 @@ import { Bar, Btn, Card, Chip, Segmented, pct } from "../components/ui";
 import { Screen } from "./InterpreterScreen";
 import { C, S, R } from "../theme";
 import { getAnalytics, getLiveTests, deleteTester } from "../lib/api";
-import { loadModel } from "../lib/runtime";
+import { useModel } from "../lib/useModel";
 import type { Analytics, LiveData, Summary } from "../lib/analyticsTypes";
 import type { ModelInfo } from "../lib/types";
 import { Header } from "../components/Header";
@@ -21,11 +21,10 @@ export function ResultsScreen() {
   const [dist, setDist] = useState("");
   const [a, setA] = useState<Analytics | null>(null);
   const [live, setLive] = useState<LiveData | null>(null);
-  const [info, setInfo] = useState<ModelInfo | null>(null);
+  const { info } = useModel();
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
-  useEffect(() => { loadModel().then(setInfo).catch(() => {}); }, []);
   useEffect(() => { getLiveTests().then(setLive).catch(() => setLive({ tests: [], attempts: [] })); }, [tick]);
   useEffect(() => {
     setError(null);

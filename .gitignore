@@ -11,3 +11,4 @@ frontend/node_modules/
 data/
 mobile/.expo/
 mobile/dist/
+mobile/modules/hand-tracker/android/build/

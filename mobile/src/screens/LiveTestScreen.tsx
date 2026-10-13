@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useIsFocused } from "@react-navigation/native";
+import { useLandscape } from "../tracking/orientation";
 import { StyleSheet, Text, TextInput, View } from "react-native";
 import { Bar, Btn, Card, Chip, Ring, Segmented } from "../components/ui";
 import { Screen } from "./InterpreterScreen";
 import { C, S, R } from "../theme";
 import { useModel } from "../lib/useModel";
-import { Recognizer } from "../lib/recognizer";
-import { handTracker } from "../tracking/handTracker";
+import { useRecognition } from "../lib/useRecognition";
+import { HandCamera, type HandFrame } from "../tracking/HandCamera";
 import { saveTest, type Attempt, type Mode, type TestMeta } from "../lib/api";
 import type { GateOutput, VocabEntry } from "../lib/types";
 import { Header } from "../components/Header";
@@ -26,14 +28,15 @@ export function LiveTestScreen() {
   const [light, setLight] = useState<string | null>(null);
   const [dist, setDist] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>("setup");
+  const focused = useIsFocused();
+  useLandscape();
+  const { gate, onFrame, reset } = useRecognition(testMode);
   const [queue, setQueue] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [elapsed, setElapsed] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [gate, setGate] = useState<GateOutput | null>(null);
   const [saved, setSaved] = useState<"idle" | "saving" | "ok" | "err">("idle");
-  const recognizer = useRef<Recognizer | null>(null);
   const startedAt = useRef(0), lock = useRef(false), meta = useRef<TestMeta>({ tester: "anon" });
   const cur = useRef({ phase, queue, idx, attempts }); cur.current = { phase, queue, idx, attempts };
 
@@ -42,8 +45,6 @@ export function LiveTestScreen() {
   const target = phase === "run" ? queue[idx] : null;
   const v = target ? byKey.get(target) : null;
 
-  useEffect(() => { if (info) recognizer.current = new Recognizer(info, testMode); }, [info]);
-  useEffect(() => { recognizer.current?.setMode(testMode); }, [testMode]);
 
   const advance = useCallback((a: Attempt) => {
     if (lock.current) return; lock.current = true;
@@ -87,27 +88,17 @@ export function LiveTestScreen() {
     saveTest(meta.current, cur.current.attempts).then(() => setSaved("ok")).catch(() => setSaved("err"));
   }, [phase]);
 
-  // Frames from the tracker feed the recogniser while a test runs.
-  useEffect(() => {
-    if (!handTracker || phase !== "run") return;
-    const stop = handTracker.start(async (f) => {
-      const rec = recognizer.current; if (!rec) return;
-      const out = await rec.push(f.hands, f.aspect, Date.now());
-      setGate(out.gate);
-    });
-    return stop;
-  }, [phase]);
 
   const start = () => {
     meta.current = { tester: name.trim() || "anon", lighting: light as TestMeta["lighting"], distance: dist as TestMeta["distance"] };
     setQueue(pool.map((p) => p.key).sort(() => Math.random() - 0.5));
-    setIdx(0); setAttempts([]); setSaved("idle"); lock.current = false; setGate(null); setPhase("run");
+    setIdx(0); setAttempts([]); setSaved("idle"); lock.current = false; reset(); setPhase("run");
   };
 
   const correct = attempts.filter((a) => a.predicted === a.target).length;
   const unsure = attempts.filter((a) => a.predicted === null).length;
   const wrong = attempts.length - correct - unsure;
-  const canStart = !!info && !!handTracker && pool.length > 0 && (!name.trim() || /^[A-Za-z0-9_ -]{1,16}$/.test(name.trim()));
+  const canStart = pool.length > 0 && (!name.trim() || /^[A-Za-z0-9_ -]{1,16}$/.test(name.trim()));
 
   if (error) return <Screen><Header /><Card><Text style={st.title}>Cannot reach the interpreter</Text><Text style={st.muted}>{error}</Text></Card></Screen>;
 
@@ -130,12 +121,12 @@ export function LiveTestScreen() {
           <Text style={st.label}>Distance (optional)</Text>
           <Segmented label="Distance" value={(dist ?? "none") as "none"} options={[["none", "Not noted"], ...DIST] as [string, string][]} onChange={(x) => setDist(x === "none" ? null : x)} />
         </Card>
-        {!handTracker && <Card><Text style={st.muted}>Recognition is not available in this build yet, so a test cannot start. The on-phone hand tracking is the next build step.</Text></Card>}
         <Btn label={!info ? "Connecting…" : `Start (${pool.length} signs)`} kind="primary" onPress={start} disabled={!canStart} />
       </>)}
 
       {phase === "run" && v && (<>
         <Card>
+          {focused && phase === "run" && <HandCamera active onFrame={onFrame} style={st.cam} />}
           <View style={st.row}><Text style={st.muted}>Show this sign</Text><Chip kind="load">{idx + 1} of {queue.length}</Chip></View>
           <Text style={[st.prompt, v.kind === "word" && st.promptWord]} numberOfLines={2}>{v.kind === "word" ? v.name : v.short}</Text>
           <View style={st.row}>
@@ -190,5 +181,5 @@ const st = StyleSheet.create({
   stats: { flexDirection: "row", gap: S.sm },
   stat: { flex: 1, backgroundColor: C.surface2, borderRadius: R.btn, padding: S.md, alignItems: "center" },
   statValue: { fontSize: 26, fontWeight: "700", color: C.text },
-  ringText: {},
+  cam: { width: "100%", aspectRatio: 4 / 3, borderRadius: R.btn, overflow: "hidden" },
 });

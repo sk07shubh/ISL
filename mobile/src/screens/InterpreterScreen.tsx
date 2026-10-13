@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, useWindowDimensions } from "react-native";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { HandCamera, type HandFrame } from "../tracking/HandCamera";
+import { useIsFocused } from "@react-navigation/native";
+import { useLandscape } from "../tracking/orientation";
 import { Bar, Btn, Card, Chip, Ring, Segmented, pct } from "../components/ui";
 import { C, S, R } from "../theme";
 import { useModel } from "../lib/useModel";
 import { useSettings } from "../state";
-import { Recognizer } from "../lib/recognizer";
+import { useRecognition } from "../lib/useRecognition";
 import { spellSign, speakableSentence, insertAt, deleteBefore, wordCount } from "../lib/sentence";
 import { speak } from "../lib/speech";
-import { handTracker } from "../tracking/handTracker";
 import { reasonText } from "../lib/gate";
 import type { Mode } from "../lib/api";
 import type { GateOutput, VocabEntry } from "../lib/types";
@@ -21,56 +22,32 @@ const KIND: Record<Mode, VocabEntry["kind"] | null> = { all: null, alphabet: "le
 export function InterpreterScreen() {
   const { s, set } = useSettings();
   const { info, signs, error, retry } = useModel();
-  const [permission, requestPermission] = useCameraPermissions();
   const [mode, setMode] = useState<Mode>("all");
-  const [gate, setGate] = useState<GateOutput | null>(null);
-  const [probs, setProbs] = useState<number[] | null>(null);
-  const [status, setStatus] = useState<string>("Starting…");
   const [text, setText] = useState("");
   const [target, setTarget] = useState<string | null>(null);
   const [signsOpen, setSignsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const textRef = useRef(""); textRef.current = text;
-  const recognizer = useRef<Recognizer | null>(null);
-  const { width } = useWindowDimensions();
-  const cam = Math.min(width - S.lg * 2, 420);
+  const { width, height: screenH } = useWindowDimensions();
+  const camH = Math.min(screenH * 0.55, 360);
+  const camW = Math.min(camH * 4 / 3, width - S.lg * 2);
 
   const byKey = useMemo(() => new Map(signs.map((v) => [v.key, v])), [signs]);
   const inMode = signs.filter((v) => KIND[mode] === null || v.kind === KIND[mode]);
 
-  useEffect(() => {
-    if (!info) return;
-    recognizer.current = new Recognizer(info, mode);
-  }, [info]);
-  useEffect(() => { recognizer.current?.setMode(mode); }, [mode]);
-
-  // Each recognised sign goes into the sentence and is spoken once, as one word or one letter.
-  const commit = useCallback((label: string) => {
+  // A confirmed sign goes into the sentence and is spoken once: one word, or one letter.
+  const commit = (label: string) => {
     const e = byKey.get(label);
     const kind = e?.kind ?? "letter";
     const shown = kind === "word" ? (e?.speak || e?.short || label) : (e?.short ?? label);
     const addSpace = kind === "word" || s.autoSpace;
-    const cur = textRef.current;
-    const next = insertAt(cur, null, shown + (addSpace ? " " : ""));
-    setText(next.text);
+    setText((cur) => insertAt(cur, null, shown + (addSpace ? " " : "")).text);
     if (s.speakEach) speak(spellSign({ key: label, kind, speak: e?.speak ?? undefined }));
-  }, [byKey, s.autoSpace, s.speakEach]);
+  };
 
-  // Tracker: frames -> recogniser -> gate. Only runs when the on-device tracker exists.
-  useEffect(() => {
-    if (!handTracker) { setStatus("Hand tracking is not in this build yet"); return; }
-    if (!info) return;
-    let lastCommit: string | null = null;
-    const stop = handTracker.start(async (f) => {
-      const rec = recognizer.current; if (!rec) return;
-      const out = await rec.push(f.hands, f.aspect, Date.now());
-      setGate(out.gate); setProbs(out.probs);
-      if (out.gate.committed && out.gate.committed !== lastCommit) { lastCommit = out.gate.committed; commit(out.gate.committed); }
-      if (!out.gate.committed && out.gate.state !== "recognised") lastCommit = null;
-    });
-    setStatus("Ready");
-    return stop;
-  }, [info, commit]);
+  const focused = useIsFocused();
+  useLandscape();
+  const { gate, probs, fps, onFrame } = useRecognition(mode, (label) => commit(label));
+  const status = "Recognising on this phone";
 
   const doSpeak = () => speak(speakableSentence(text));
   const doSpace = () => setText(insertAt(text, null, " ").text);
@@ -79,8 +56,7 @@ export function InterpreterScreen() {
 
   const live = gate?.state === "recognised" && gate.label ? gate.label : null;
   const holdSec = gate ? (gate.holdProgress * gate.holdMs) / 1000 : 0;
-  const hint = !handTracker ? "Recognition is not available in this build yet"
-    : gate?.state === "uncertain" ? reasonText(gate.reason)
+  const hint = gate?.state === "uncertain" ? reasonText(gate.reason)
     : gate?.state === "recognised" ? (gate.locked && gate.holdProgress >= 1 ? "Added. Change or lower your hand to sign again" : "Keep holding steady")
     : "Show your hand to the camera";
 
@@ -94,17 +70,12 @@ export function InterpreterScreen() {
 
       {/* Camera */}
       <Card style={{ padding: S.sm }}>
-        <View style={[st.camBox, { width: cam, height: cam * 1.33, alignSelf: "center" }]}>
-          {permission?.granted ? (
-            <CameraView style={StyleSheet.absoluteFill} facing="front" />
-          ) : (
-            <Pressable style={st.camPermit} onPress={requestPermission} accessibilityRole="button">
-              <Text style={st.camPermitText}>Allow the camera to start</Text>
-            </Pressable>
-          )}
+        <View style={[st.camBox, { width: camW, height: camH, alignSelf: "center" }]}>
+          {focused && <HandCamera active={focused} onFrame={onFrame} style={StyleSheet.absoluteFill} />}
           <View style={st.camChip}>
-            {gate?.state === "recognised" ? <Chip kind="ok">Recognised</Chip> : gate?.state === "uncertain" ? <Chip kind="warn">Uncertain</Chip> : <Chip kind="idle">{handTracker ? "No hand" : "Not available"}</Chip>}
+            {gate?.state === "recognised" ? <Chip kind="ok">Recognised</Chip> : gate?.state === "uncertain" ? <Chip kind="warn">Uncertain</Chip> : <Chip kind="idle">No hand</Chip>}
           </View>
+          <View style={st.camFps}><Text style={st.camFpsText}>{fps} fps</Text></View>
         </View>
         <Text style={[st.muted, { textAlign: "center" }]}>{status}</Text>
       </Card>
@@ -118,7 +89,7 @@ export function InterpreterScreen() {
         <View style={st.signRow}>
           <View style={{ flex: 1 }}>
             <Text style={live ? st.word : st.wordPlaceholder} numberOfLines={2} adjustsFontSizeToFit>
-              {live ? (byKey.get(live)?.short ?? live) : gate?.state === "uncertain" ? "Uncertain" : handTracker ? "No hand" : "—"}
+              {live ? (byKey.get(live)?.short ?? live) : gate?.state === "uncertain" ? "Uncertain" : "No hand"}
             </Text>
           </View>
           <Ring value={live ? gate!.holdProgress : 0} size={92} color={gate?.locked && live ? C.ok : C.primary}>
@@ -220,8 +191,8 @@ const st = StyleSheet.create({
   muted: { fontSize: 14, color: C.text3, lineHeight: 20 },
   mono: { fontSize: 15, fontWeight: "700", color: C.text, fontVariant: ["tabular-nums"] },
   camBox: { backgroundColor: "#0f172a", borderRadius: R.card, overflow: "hidden" },
-  camPermit: { flex: 1, alignItems: "center", justifyContent: "center", padding: S.lg },
-  camPermitText: { color: "#fff", fontSize: 16, fontWeight: "600", textAlign: "center" },
+  camFps: { position: "absolute", bottom: 10, right: 10, backgroundColor: "rgba(15,23,42,0.7)", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  camFpsText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   camChip: { position: "absolute", top: 12, left: 12 },
   signRow: { flexDirection: "row", alignItems: "center", gap: S.md, minHeight: 100 },
   word: { fontSize: 64, lineHeight: 70, fontWeight: "700", color: C.text, letterSpacing: -1 },
