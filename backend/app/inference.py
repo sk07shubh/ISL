@@ -52,7 +52,7 @@ class Head:
 
     def aspect_for(self, frame_aspect: float) -> float:
         """Alphabet: the camera frame's aspect. Digits/phrases: the aspect in their config (as live_clean.py)."""
-        return float(frame_aspect) if self.name == "alphabet" else float(self.cfg.get("aspect", frame_aspect))
+        return float(self.cfg.get("aspect", 1.0)) if self.name == "alphabet" else float(self.cfg.get("aspect", frame_aspect))
 
     def forward(self, x: np.ndarray) -> np.ndarray:
         a = np.asarray(x, np.float64)
