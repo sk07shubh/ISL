@@ -179,6 +179,12 @@ export function Interpreter() {
   );
 }
 
+function signImagePath(v: VocabEntry) {
+  const category = v.kind === "letter" ? "letters" : v.kind === "digit" ? "digits" : "phrases";
+  const label = v.kind === "word" ? v.key.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") : v.short.toUpperCase();
+  return `/isl-sign-illustrations/${category}/${label}.png`;
+}
+
 function SignTile({ v, live, target, onPick }: { v: VocabEntry; live: boolean; target: boolean; onPick: () => void }) {
   const palette = v.kind === "letter"
     ? { bg: "linear-gradient(145deg,#eef8ff 0%,#dceeff 100%)", ink: "#234f88", accent: "#8bc8ff" }
@@ -195,19 +201,26 @@ function SignTile({ v, live, target, onPick }: { v: VocabEntry; live: boolean; t
         border: target ? "2px solid #7862d8" : live ? "2px solid #28a879" : "1px solid rgba(111,143,178,.15)",
         borderRadius: 16,
         boxShadow: live ? "0 0 0 3px rgba(40,168,121,.12),0 5px 14px rgba(36,72,112,.08)" : "0 4px 12px rgba(36,72,112,.06)",
-        padding: "12px 8px 10px",
+        padding: "10px 8px 10px",
         minHeight: 116,
         color: palette.ink,
         transition: "box-shadow .18s ease,border-color .18s ease,transform .18s ease"
       }}
     >
       <span aria-hidden="true" style={{
-        display: "grid", placeItems: "center", width: 54, height: 54,
-        margin: "0 auto 8px", borderRadius: 18,
-        background: "rgba(255,255,255,.68)",
+        display: "grid", placeItems: "center", width: "100%", height: 76,
+        margin: "0 auto 8px", borderRadius: 12, overflow: "hidden",
+        background: "rgba(255,255,255,.55)",
         border: `1px solid ${palette.accent}`,
         boxShadow: "inset 0 1px 0 rgba(255,255,255,.9)"
       }}>
+        <img
+          src={signImagePath(v)}
+          alt=""
+          loading="lazy"
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
+          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+        />
         <span className={`glyph ${v.kind === "word" ? "wordy" : ""}`} style={{
           color: palette.ink, fontSize: v.kind === "word" ? 17 : 29,
           fontWeight: 750, lineHeight: 1.05, letterSpacing: v.kind === "word" ? "-.4px" : "-1px"
