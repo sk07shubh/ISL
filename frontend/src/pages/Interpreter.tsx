@@ -180,15 +180,44 @@ export function Interpreter() {
 }
 
 function SignTile({ v, live, target, onPick }: { v: VocabEntry; live: boolean; target: boolean; onPick: () => void }) {
+  const palette = v.kind === "letter"
+    ? { bg: "linear-gradient(145deg,#eef8ff 0%,#dceeff 100%)", ink: "#234f88", accent: "#8bc8ff" }
+    : v.kind === "digit"
+      ? { bg: "linear-gradient(145deg,#effaf2 0%,#dcf4e4 100%)", ink: "#216a4d", accent: "#8bd4ae" }
+      : { bg: "linear-gradient(145deg,#f7f1ff 0%,#e9e0ff 100%)", ink: "#5d438f", accent: "#c4a9ff" };
   return (
-    <button className={`tile ${live ? "live" : ""} ${target ? "target" : ""}`} onClick={onPick} aria-pressed={target}>
-      <span className={`glyph ${v.kind === "word" ? "wordy" : ""}`} aria-hidden="true">{v.short}</span>
-      <b>{v.name}</b>
-      <small>{v.category}</small>
+    <button
+      className={`tile ${live ? "live" : ""} ${target ? "target" : ""}`}
+      onClick={onPick}
+      aria-pressed={target}
+      style={{
+        background: palette.bg,
+        border: target ? "2px solid #7862d8" : live ? "2px solid #28a879" : "1px solid rgba(111,143,178,.15)",
+        borderRadius: 16,
+        boxShadow: live ? "0 0 0 3px rgba(40,168,121,.12),0 5px 14px rgba(36,72,112,.08)" : "0 4px 12px rgba(36,72,112,.06)",
+        padding: "12px 8px 10px",
+        minHeight: 116,
+        color: palette.ink,
+        transition: "box-shadow .18s ease,border-color .18s ease,transform .18s ease"
+      }}
+    >
+      <span aria-hidden="true" style={{
+        display: "grid", placeItems: "center", width: 54, height: 54,
+        margin: "0 auto 8px", borderRadius: 18,
+        background: "rgba(255,255,255,.68)",
+        border: `1px solid ${palette.accent}`,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,.9)"
+      }}>
+        <span className={`glyph ${v.kind === "word" ? "wordy" : ""}`} style={{
+          color: palette.ink, fontSize: v.kind === "word" ? 17 : 29,
+          fontWeight: 750, lineHeight: 1.05, letterSpacing: v.kind === "word" ? "-.4px" : "-1px"
+        }}>{v.short}</span>
+      </span>
+      <b style={{ display: "block", color: palette.ink, fontSize: 13, lineHeight: 1.25 }}>{v.name}</b>
+      <small style={{ display: "block", color: palette.ink, opacity: .7, fontSize: 10, marginTop: 4 }}>{v.category}</small>
     </button>
   );
 }
-
 function PipelineStrip({ f, info, mode, words }: { f: FrameInfo | null; info: ModelInfo | null; mode: Mode; words: number }) {
   const g = f?.gate;
   const short = (r?: string) => ({ low_prob: "Below threshold", low_margin: "Close call", unstable: "Settling", rejected: "Filling window" } as Record<string, string>)[r ?? ""] ?? "Uncertain";
