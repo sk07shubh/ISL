@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { HandCamera, type HandFrame } from "../tracking/HandCamera";
 import { useIsFocused } from "@react-navigation/native";
 import { useLandscape } from "../tracking/orientation";
@@ -18,6 +18,14 @@ import { Header } from "../components/Header";
 
 const MODES: [Mode, string][] = [["all", "All"], ["alphabet", "Letters"], ["digit", "Digits"], ["phrase", "Phrases"]];
 const KIND: Record<Mode, VocabEntry["kind"] | null> = { all: null, alphabet: "letter", digit: "digit", phrase: "word" };
+
+// Add the chart crops under mobile/assets/isl-sign-illustrations/{letters,digits,phrases}/.
+// The source is a URI so the app keeps working with text fallbacks until the PNGs are added.
+function signImageUri(v: VocabEntry) {
+  const category = v.kind === "letter" ? "letters" : v.kind === "digit" ? "digits" : "phrases";
+  const label = v.kind === "word" ? v.key.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") : v.short.toUpperCase();
+  return `isl-sign-illustrations/${category}/${label}.png`;
+}
 
 export function InterpreterScreen() {
   const { s, set } = useSettings();
@@ -153,7 +161,13 @@ export function InterpreterScreen() {
                     live === v.key && st.tileLive,
                     target === v.key && st.tileTarget
                   ]}>
-                  <View style={[st.tileGlyphWrap, { borderColor: palette.accent }]}>
+                  <View style={[st.tileGlyphWrap, { borderColor: palette.accent, width: "100%", height: 68, borderRadius: 12, overflow: "hidden" }]}>
+                    <Image
+                      source={{ uri: signImageUri(v) }}
+                      style={{ width: "100%", height: "100%" }}
+                      resizeMode="contain"
+                      accessibilityLabel={`ISL hand sign for ${v.name}`}
+                    />
                     <Text style={[st.tileGlyph, { color: palette.ink }, v.kind === "word" && st.tileWord]} numberOfLines={2}>{v.short}</Text>
                   </View>
                   <Text style={[st.tileName, { color: palette.ink }]} numberOfLines={2}>{v.name}</Text>
