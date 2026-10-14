@@ -161,14 +161,13 @@ export function InterpreterScreen() {
                     live === v.key && st.tileLive,
                     target === v.key && st.tileTarget
                   ]}>
-                  <View style={[st.tileGlyphWrap, { borderColor: palette.accent, width: "100%", height: 68, borderRadius: 12, overflow: "hidden" }]}>
+                  <View style={[st.tileGlyphWrap, { position: "relative", borderColor: palette.accent, width: "100%", height: 86, borderRadius: 12, overflow: "hidden", marginBottom: 8, backgroundColor: "rgba(255,255,255,0.35)" }]}>
                     <Image
                       source={{ uri: signImageUri(v) }}
                       style={{ width: "100%", height: "100%" }}
                       resizeMode="contain"
                       accessibilityLabel={`ISL hand sign for ${v.name}`}
                     />
-                    <Text style={[st.tileGlyph, { color: palette.ink }, v.kind === "word" && st.tileWord]} numberOfLines={2}>{v.short}</Text>
                   </View>
                   <Text style={[st.tileName, { color: palette.ink }]} numberOfLines={2}>{v.name}</Text>
                   <Text style={[st.tileSub, { color: palette.ink }]} numberOfLines={1}>{v.category}</Text>
