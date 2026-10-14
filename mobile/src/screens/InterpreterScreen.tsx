@@ -139,13 +139,28 @@ export function InterpreterScreen() {
           <View style={st.row}><Text style={st.title}>Signs I know</Text><Btn label="Done" kind="primary" onPress={() => setSignsOpen(false)} /></View>
           <Segmented label="Filter" value={mode} options={MODES} onChange={setMode} />
           <View style={st.grid}>
-            {inMode.map((v) => (
-              <Pressable key={v.key} onPress={() => setTarget(target === v.key ? null : v.key)} accessibilityRole="button"
-                style={[st.tile, live === v.key && st.tileLive, target === v.key && st.tileTarget]}>
-                <Text style={[st.tileGlyph, v.kind === "word" && st.tileWord]} numberOfLines={2}>{v.short}</Text>
-                <Text style={st.tileSub}>{v.category}</Text>
-              </Pressable>
-            ))}
+            {inMode.map((v) => {
+              const palette = v.kind === "letter"
+                ? { bg: "#e6f3ff", ink: "#234f88", accent: "#9bcfff" }
+                : v.kind === "digit"
+                  ? { bg: "#e7f7eb", ink: "#216a4d", accent: "#a4dfba" }
+                  : { bg: "#f0e9ff", ink: "#5d438f", accent: "#cdb9ff" };
+              return (
+                <Pressable key={v.key} onPress={() => setTarget(target === v.key ? null : v.key)} accessibilityRole="button"
+                  style={[
+                    st.tile,
+                    { backgroundColor: palette.bg, borderColor: palette.accent, borderRadius: 16, minHeight: 112, aspectRatio: 0.88, shadowColor: "#304b70", shadowOpacity: 0.08, shadowRadius: 7, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+                    live === v.key && st.tileLive,
+                    target === v.key && st.tileTarget
+                  ]}>
+                  <View style={[st.tileGlyphWrap, { borderColor: palette.accent }]}>
+                    <Text style={[st.tileGlyph, { color: palette.ink }, v.kind === "word" && st.tileWord]} numberOfLines={2}>{v.short}</Text>
+                  </View>
+                  <Text style={[st.tileName, { color: palette.ink }]} numberOfLines={2}>{v.name}</Text>
+                  <Text style={[st.tileSub, { color: palette.ink }]} numberOfLines={1}>{v.category}</Text>
+                </Pressable>
+              );
+            })}
           </View>
           {target && <Text style={st.muted}>Practising: {byKey.get(target)?.name}. Show it to the camera.</Text>}
         </Screen>
@@ -207,12 +222,14 @@ const st = StyleSheet.create({
   sentence: { minHeight: 110, padding: S.md, backgroundColor: C.surface2, borderRadius: R.btn, borderWidth: 1, borderColor: C.surface3, fontSize: 26, lineHeight: 34, fontWeight: "700", color: C.text, textAlignVertical: "top" },
   btnGrid: { flexDirection: "row", flexWrap: "wrap", gap: S.sm },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: S.sm },
-  tile: { width: "31%", aspectRatio: 1, backgroundColor: C.surface, borderRadius: R.btn, borderWidth: 1, borderColor: C.line, alignItems: "center", justifyContent: "center", padding: 6 },
-  tileLive: { borderColor: C.ok, backgroundColor: C.okBg },
+  tile: { width: "31%", minHeight: 112, borderRadius: 16, borderWidth: 1, alignItems: "center", justifyContent: "center", padding: 8 },
+  tileLive: { borderColor: C.ok, borderWidth: 2, backgroundColor: C.okBg },
   tileTarget: { borderColor: C.primary, borderWidth: 2 },
-  tileGlyph: { fontSize: 30, fontWeight: "700", color: C.primary },
-  tileWord: { fontSize: 13, lineHeight: 16, textAlign: "center", color: C.text },
-  tileSub: { fontSize: 11, color: C.text3, marginTop: 2 },
+  tileGlyphWrap: { width: 52, height: 52, borderRadius: 17, borderWidth: 1, backgroundColor: "rgba(255,255,255,0.72)", alignItems: "center", justifyContent: "center", marginBottom: 7 },
+  tileGlyph: { fontSize: 29, fontWeight: "800", color: C.primary },
+  tileWord: { fontSize: 15, lineHeight: 17, textAlign: "center", color: C.text },
+  tileName: { fontSize: 12, lineHeight: 15, fontWeight: "700", textAlign: "center" },
+  tileSub: { fontSize: 10, color: C.text3, marginTop: 3, opacity: 0.72, textAlign: "center" },
   scrim: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)" },
   sheet: { backgroundColor: C.surface, padding: S.xl, gap: S.md, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
   toggle: { flexDirection: "row", alignItems: "center", gap: S.md, paddingVertical: S.sm, borderBottomWidth: 1, borderBottomColor: C.line },
