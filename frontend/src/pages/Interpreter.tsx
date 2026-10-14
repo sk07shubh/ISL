@@ -186,6 +186,7 @@ function signImagePath(v: VocabEntry) {
 }
 
 function SignTile({ v, live, target, onPick }: { v: VocabEntry; live: boolean; target: boolean; onPick: () => void }) {
+  const [imageLoaded, setImageLoaded] = useState(false);
   const palette = v.kind === "letter"
     ? { bg: "linear-gradient(145deg,#eef8ff 0%,#dceeff 100%)", ink: "#234f88", accent: "#8bc8ff" }
     : v.kind === "digit"
@@ -208,9 +209,9 @@ function SignTile({ v, live, target, onPick }: { v: VocabEntry; live: boolean; t
       }}
     >
       <span aria-hidden="true" style={{
-        display: "grid", placeItems: "center", width: "100%", height: 76,
-        margin: "0 auto 8px", borderRadius: 12, overflow: "hidden",
-        background: "rgba(255,255,255,.55)",
+        position: "relative", display: "block", width: "100%", height: 86,
+        flexShrink: 0, margin: "0 auto 8px", borderRadius: 12, overflow: "hidden",
+        background: "rgba(255,255,255,.38)",
         border: `1px solid ${palette.accent}`,
         boxShadow: "inset 0 1px 0 rgba(255,255,255,.9)"
       }}>
@@ -218,13 +219,16 @@ function SignTile({ v, live, target, onPick }: { v: VocabEntry; live: boolean; t
           src={signImagePath(v)}
           alt=""
           loading="lazy"
-          onError={(e) => { e.currentTarget.style.display = "none"; }}
-          style={{ width: "100%", height: "100%", objectFit: "contain" }}
+          onLoad={() => setImageLoaded(true)}
+          onError={() => setImageLoaded(false)}
+          style={{ display: "block", width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", padding: 2, boxSizing: "border-box" }}
         />
-        <span className={`glyph ${v.kind === "word" ? "wordy" : ""}`} style={{
+        {!imageLoaded && <span className={`glyph ${v.kind === "word" ? "wordy" : ""}`} style={{
+          position: "absolute", inset: 0, margin: 0, width: "100%", height: "100%",
+          boxSizing: "border-box", borderRadius: 0, background: "transparent",
           color: palette.ink, fontSize: v.kind === "word" ? 17 : 29,
           fontWeight: 750, lineHeight: 1.05, letterSpacing: v.kind === "word" ? "-.4px" : "-1px"
-        }}>{v.short}</span>
+        }}>{v.short}</span>}
       </span>
       <b style={{ display: "block", color: palette.ink, fontSize: 13, lineHeight: 1.25 }}>{v.name}</b>
       <small style={{ display: "block", color: palette.ink, opacity: .7, fontSize: 10, marginTop: 4 }}>{v.category}</small>
