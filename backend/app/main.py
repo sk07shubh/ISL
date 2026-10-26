@@ -198,7 +198,8 @@ def analytics_endpoint(lighting: Optional[Literal["bright", "dim", "mixed"]] = N
 def live_tests():
     with D.db() as con:
         tests = [dict(r) for r in con.execute(
-            "SELECT t.id,t.tester,t.created_at,t.lighting,t.distance,COUNT(a.id) attempts, SUM(a.predicted=a.target) correct "
+            "SELECT t.id,t.tester,t.created_at,t.lighting,t.distance,COUNT(a.id) attempts, " 
+            "SUM(CASE WHEN a.predicted = a.target THEN 1 ELSE 0 END) correct "
             "FROM live_tests t LEFT JOIN live_attempts a ON a.test_id=t.id GROUP BY t.id ORDER BY t.id DESC")]
         attempts = [dict(r) for r in con.execute(
             "SELECT t.tester, a.target, a.predicted, a.confidence, a.margin FROM live_attempts a JOIN live_tests t ON t.id=a.test_id "
