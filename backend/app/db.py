@@ -6,7 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "backend" / "data"
-DB_PATH = Path(os.environ.get("ISL_DB", DATA / "isl.db"))
+DEFAULT_DB = Path("/tmp/isl.db") if os.environ.get("VERCEL") else DATA / "isl.db"
+DB_PATH = Path(os.environ.get("ISL_DB", DEFAULT_DB))
 MODEL_DIR = ROOT / "model"
 
 SCHEMA = """
