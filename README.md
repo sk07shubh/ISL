@@ -69,11 +69,16 @@ Live tests (**Live test** page) record, for every letter asked: what the app sho
 - **Calibration (ECE)**: within each confidence band, the gap between stated confidence and how often the top prediction was right.
 - **Conditions**: accuracy broken down by signer, lighting, distance (recorded by the tester), hand size, and measured brightness. The hand-size and brightness bands are provisional and should be tuned on real data.
 
-## Hosting
-The repo includes a `Dockerfile`. The container starts `scripts/run.py`, which listens on the `PORT` that the hosting platform provides.
-- Set `ISL_DB=/data/isl.db` and attach a persistent volume at `/data`, so live-test results survive restarts.
-- Check the service with `GET /health`. It reports the model files and the parity check.
-- Camera access in the browser needs HTTPS. Most platforms provide this automatically.
+## Hosting on Vercel
+The Vercel deployment serves the Vite frontend and FastAPI backend on the same domain. Trained models and MediaPipe assets remain in their existing repository folders.
+
+**Persistent live-test storage is PostgreSQL.** Vercel serverless instances cannot safely use a local SQLite file for durable records. Connect a PostgreSQL provider (for example, Neon from the Vercel Marketplace) to the Vercel project in the account where this app is deployed, then add the provider's connection string as the production environment variable `DATABASE_URL`. Use the pooled/runtime connection string recommended by the provider. Keep the value secret; do not commit it to Git.
+
+- Vercel startup intentionally fails if `DATABASE_URL` is missing, instead of silently saving records to temporary storage.
+- Local development still uses SQLite at `backend/data/isl.db` by default; set `ISL_DB` to change that path.
+- Existing live-test endpoints and analytics use the same schema on SQLite and PostgreSQL. New databases are initialized automatically at startup.
+- Check `GET /health` after deployment. It reports the model files and the model parity check; save and reload a live test to confirm persistent storage.
+- Camera access in the browser needs HTTPS. Vercel provides HTTPS automatically.
 
 ## Android app (mobile/)
 An Expo app that opens the hosted website in an Android WebView, with camera access. Build an APK with EAS:
