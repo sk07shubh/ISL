@@ -12,7 +12,7 @@ from typing import List, Literal, Optional
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -218,9 +218,14 @@ def delete_tester(tester: str):
 
 @app.api_route("/mediapipe/hand_landmarker.task", methods=["GET", "HEAD"], include_in_schema=False)
 def tracker_model():
-    if not I.TASK_FILE.exists():
-        raise HTTPException(404, "model/hand_landmarker.task is missing")
-    return FileResponse(I.TASK_FILE, media_type="application/octet-stream")
+    # Keep using the repository copy when available. Some deployments omit this large
+    # MediaPipe binary from Git, so fall back to Google's official hosted model.
+    if I.TASK_FILE.is_file():
+        return FileResponse(I.TASK_FILE, media_type="application/octet-stream")
+    return RedirectResponse(
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+        status_code=307,
+    )
 
 
 @app.middleware("http")
