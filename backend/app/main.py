@@ -159,8 +159,10 @@ def predict(body: HandsIn):
 @app.post("/api/live-tests", status_code=201, tags=["live tests"])
 def save_test(body: TestIn):
     with D.db() as con:
-        tid = con.execute("INSERT INTO live_tests(tester,created_at,note,lighting,distance) VALUES(?,?,?,?,?)",
-                          (body.tester, D.now(), body.note, body.lighting, body.distance)).lastrowid
+        tid = con.execute(
+            "INSERT INTO live_tests(tester,created_at,note,lighting,distance) VALUES(?,?,?,?,?) RETURNING id",
+            (body.tester, D.now(), body.note, body.lighting, body.distance),
+        ).fetchone()["id"]
         con.executemany(
             "INSERT INTO live_attempts(test_id,target,predicted,confidence,margin,top_label,top_conf,elapsed_ms,hand_size,brightness) "
             "VALUES(?,?,?,?,?,?,?,?,?,?)",
