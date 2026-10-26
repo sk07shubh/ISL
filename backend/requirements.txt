@@ -2,3 +2,4 @@ fastapi>=0.110
 uvicorn>=0.29
 pydantic>=2.5
 numpy>=1.24
+psycopg[binary]>=3.2,<4
